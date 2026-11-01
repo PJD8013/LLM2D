@@ -1,0 +1,190 @@
+diff --git a/apps/lines/package.json b/apps/lines/package.json
+index 6ac4b7d..cd7b3e6 100644
+--- a/apps/lines/package.json
++++ b/apps/lines/package.json
+@@ -49,6 +49,7 @@
+ 		"utils-book": "workspace:*",
+ 		"utils-bet": "workspace:*",
+ 		"utils-layout": "workspace:*",
+-		"utils-sound": "workspace:*"
++		"utils-sound": "workspace:*",
++		"@llm2d/svelte": "file:../../vendor/llm2d-svelte-0.1.0.tgz"
+ 	}
+ }
+\ No newline at end of file
+diff --git a/apps/lines/src/components/ReelSymbol.svelte b/apps/lines/src/components/ReelSymbol.svelte
+index 27f9dbc..c614794 100644
+--- a/apps/lines/src/components/ReelSymbol.svelte
++++ b/apps/lines/src/components/ReelSymbol.svelte
+@@ -18,7 +18,7 @@
+ <SymbolWrap
+ 	x={getSymbolX(props.reelIndex)}
+ 	y={props.reelSymbol.symbolY()}
+-	animating={symbolInfo.type === 'spine' &&
++	animating={(symbolInfo.type === 'spine' || symbolInfo.type === 'llm2d') &&
+ 		(props.reelSymbol.symbolState === 'land' || props.reelSymbol.symbolState === 'win')}
+ >
+ 	<Symbol
+diff --git a/apps/lines/src/components/Symbol.svelte b/apps/lines/src/components/Symbol.svelte
+index cb5efd2..ce85fa2 100644
+--- a/apps/lines/src/components/Symbol.svelte
++++ b/apps/lines/src/components/Symbol.svelte
+@@ -1,6 +1,7 @@
+ <script lang="ts">
+ 	import SymbolSpine from './SymbolSpine.svelte';
+ 	import SymbolSprite from './SymbolSprite.svelte';
++	import SymbolLlm2d from './SymbolLlm2d.svelte';
+ 	import { getSymbolInfo } from '../game/utils';
+ 	import type { SymbolState, RawSymbol } from '../game/types';
+ 	import { getContext } from '../game/context';
+@@ -23,6 +24,15 @@
+ 
+ {#if isSprite}
+ 	<SymbolSprite {symbolInfo} x={props.x} y={props.y} oncomplete={props.oncomplete} />
++{:else if symbolInfo.type === 'llm2d'}
++	<SymbolLlm2d
++		{symbolInfo}
++		x={props.x}
++		y={props.y}
++		loop={props.loop}
++		showWinFrame={props.state === 'win'}
++		oncomplete={props.oncomplete}
++	/>
+ {:else}
+ 	<SymbolSpine
+ 		loop={props.loop}
+diff --git a/apps/lines/src/components/SymbolLlm2d.svelte b/apps/lines/src/components/SymbolLlm2d.svelte
+new file mode 100644
+index 0000000..0378a0d
+--- /dev/null
++++ b/apps/lines/src/components/SymbolLlm2d.svelte
+@@ -0,0 +1,50 @@
++<script lang="ts">
++	import { SpineProvider, SpineTrack } from 'pixi-svelte';
++	import { Llm2dProvider, Llm2dTrack } from '@llm2d/svelte';
++	import { stateBetDerived } from 'state-shared';
++
++	import { SYMBOL_SIZE } from '../game/constants';
++
++	type Props = {
++		symbolInfo: {
++			assetKey: string;
++			animationName?: string;
++			sizeRatios: { width: number; height: number };
++		};
++		x?: number;
++		y?: number;
++		loop?: boolean;
++		showWinFrame?: boolean;
++		oncomplete?: () => void;
++	};
++
++	const props: Props = $props();
++	// idle loops on its own; land and win play once and report `complete` (unless the caller sets loop).
++	const animationName = $derived(props.symbolInfo.animationName ?? 'idle');
++</script>
++
++<!-- Same slot as SymbolSpineMain: centred on (x, y), fitted to the cell, sped up with turbo. -->
++<Llm2dProvider
++	x={props.x}
++	y={props.y}
++	anchor={0.5}
++	key={props.symbolInfo.assetKey}
++	width={SYMBOL_SIZE * props.symbolInfo.sizeRatios.width}
++	height={SYMBOL_SIZE * props.symbolInfo.sizeRatios.height}
++>
++	<Llm2dTrack
++		trackIndex={0}
++		{animationName}
++		loop={props.loop ?? animationName === 'idle'}
++		mix={0.1}
++		timeScale={stateBetDerived.timeScale()}
++		listener={{ complete: () => props.oncomplete?.() }}
++	/>
++</Llm2dProvider>
++
++<!-- tumble frame, as in SymbolSpine -->
++{#if props.showWinFrame}
++	<SpineProvider x={props.x} y={props.y} key="anticipation" width={SYMBOL_SIZE * 0.19}>
++		<SpineTrack trackIndex={0} animationName={'payframe'} loop />
++	</SpineProvider>
++{/if}
+diff --git a/apps/lines/src/game/assets.ts b/apps/lines/src/game/assets.ts
+index 15c2c09..dbdc2c8 100644
+--- a/apps/lines/src/game/assets.ts
++++ b/apps/lines/src/game/assets.ts
+@@ -1,3 +1,9 @@
++import { registerLlm2dLoader } from '@llm2d/svelte';
++
++// Lets PIXI.Assets (and so pixi-svelte's AssetsLoader) load `.l2d.json` files as LLM2D skeletons.
++// Called here so both the game and the stories register it before any asset loads.
++registerLlm2dLoader();
++
+ export default {
+ 	loader: {
+ 		type: 'spine',
+@@ -268,6 +274,10 @@ export default {
+ 		type: 'spriteSheet',
+ 		src: new URL('../../assets/sprites/coin/SD2_Coin.json', import.meta.url).href,
+ 	},
++	llm2dCoin: {
++		type: 'sprite',
++		src: new URL('../../assets/llm2d/coin/coin.l2d.json', import.meta.url).href,
++	},
+ 	sound: {
+ 		type: 'audio',
+ 		src: new URL('../../assets/audio/sounds.json', import.meta.url).href,
+diff --git a/apps/lines/src/game/constants.ts b/apps/lines/src/game/constants.ts
+index b09c3cd..b3c7c03 100644
+--- a/apps/lines/src/game/constants.ts
++++ b/apps/lines/src/game/constants.ts
+@@ -191,19 +191,22 @@ const wStatic = { type: 'sprite', assetKey: 'w.png', sizeRatios: { width: 1.12,
+ const wSizeRatios = { width: 1.5 * 0.9, height: SPECIAL_SYMBOL_SIZE * 1.15 };
+ const sSizeRatios = { width: 2.5, height: SPECIAL_SYMBOL_SIZE * 2.3 };
+ 
++// H1 is an LLM2D skeleton (samples/coin in the LLM2D repo): idle loop, land bounce, win burst.
++const h1Llm2d = (animationName: 'idle' | 'land' | 'win') => ({
++	type: 'llm2d',
++	assetKey: 'llm2dCoin',
++	animationName,
++	sizeRatios: { width: HIGH_SYMBOL_SIZE * 0.95, height: HIGH_SYMBOL_SIZE * 0.95 },
++});
++
+ export const SYMBOL_INFO_MAP = {
+ 	H1: {
+ 		explosion,
+-		win: {
+-			type: 'spine',
+-			assetKey: 'H1',
+-			animationName: 'h1',
+-			sizeRatios: { width: 0.5 * 1.15, height: HIGH_SYMBOL_SIZE * 0.57 },
+-		},
+-		postWinStatic: h1Static,
+-		static: h1Static,
+-		spin: h1Static,
+-		land: h1Static,
++		win: h1Llm2d('win'),
++		postWinStatic: h1Llm2d('idle'),
++		static: h1Llm2d('idle'),
++		spin: h1Llm2d('idle'),
++		land: h1Llm2d('land'),
+ 	},
+ 	H2: {
+ 		explosion,
+diff --git a/package.json b/package.json
+index 3f7602c..505cf04 100644
+--- a/package.json
++++ b/package.json
+@@ -31,6 +31,10 @@
+     "onlyBuiltDependencies": [
+       "esbuild",
+       "svelte-preprocess"
+-    ]
++    ],
++    "overrides": {
++      "@llm2d/core": "file:./vendor/llm2d-core-0.1.0.tgz",
++      "@llm2d/pixi": "file:./vendor/llm2d-pixi-0.1.0.tgz"
++    }
+   }
+ }
+\ No newline at end of file

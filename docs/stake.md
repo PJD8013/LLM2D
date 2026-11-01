@@ -6,6 +6,12 @@ LLM2D 스켈레톤을 Stake Engine 웹 SDK 게임(PixiJS 8 + Svelte 5 + `pixi-sv
 
 ![릴 데모](images/reel-demo.png)
 
+실제 Stake 게임 저장소에 붙인 예: [`examples/stake-lines`](../examples/stake-lines). 공식 web-sdk의
+샘플 게임 `lines`에서 H1 심볼을 LLM2D 동전으로 바꾸고, Storybook에서 스핀·착지·당첨까지 확인했습니다.
+`pnpm stake:lines apply ../web-sdk` 한 줄로 적용됩니다.
+
+![lines 게임의 LLM2D 심볼](images/stake-lines-win.png)
+
 ## 1. 게임용으로 내보내기
 
 이미지를 아틀라스 페이지로 묶고 JSON을 줄인 파일을 게임의 static 폴더에 씁니다.
@@ -122,7 +128,21 @@ export default {
 `animationName`을 바꾸면 이전 애니메이션에서 부드럽게 넘어갑니다. 컴포넌트를 제거하면 그 트랙이
 `mixOut` 동안 사라집니다. `listener`는 Spine과 같은 모양(`start`, `complete`, `end`, `interrupt`, `event`)입니다.
 
-## 5. 애니메이션 이름 약속
+## 5. 심볼 상태와 연결하기 (web-sdk 샘플 게임)
+
+web-sdk 샘플 게임은 심볼마다 `static`, `spin`, `land`, `win`, `postWinStatic` 상태를 쓰고,
+`SYMBOL_INFO_MAP`에서 상태별로 그릴 것(`sprite` 또는 `spine`)을 정합니다. LLM2D 심볼은 `type: 'llm2d'`를
+하나 더 두고 같은 자리에서 고릅니다.
+
+- `static`, `spin`, `postWinStatic` → `idle`(반복)
+- `land`, `win` → 한 번 재생. `Llm2dTrack`의 `listener.complete`로 게임의 `oncomplete`를 불러야
+  `land` → `static`, `win` → `postWinStatic`으로 넘어갑니다.
+- `land`/`win` 중에는 Spine 심볼처럼 마스크 밖 보드에 그려야 커진 심볼이 잘리지 않습니다(`ReelSymbol`의 `animating`).
+- 터보 속도는 `timeScale={stateBetDerived.timeScale()}`.
+
+전체 코드는 [`examples/stake-lines/lines.patch`](../examples/stake-lines/lines.patch)의 `SymbolLlm2d.svelte`를 보세요.
+
+## 6. 애니메이션 이름 약속
 
 | 대상 | 이름 | 반복 |
 |---|---|---|
