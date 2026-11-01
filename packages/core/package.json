@@ -1,0 +1,11 @@
+{
+  "name": "@llm2d/core",
+  "version": "0.1.0",
+  "description": "LLM2D skeletal animation format, validator and engine-agnostic runtime math.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false
+}

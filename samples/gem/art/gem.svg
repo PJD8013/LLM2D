@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><g stroke-linejoin="round">
+      <polygon points="55,20 15,60 52,60" fill="#FF6FA0"/>
+      <polygon points="55,20 52,60 90,20" fill="#FF9DC0"/>
+      <polygon points="90,20 52,60 128,60" fill="#FFC4DA"/>
+      <polygon points="90,20 128,60 125,20" fill="#FF8DB6"/>
+      <polygon points="125,20 128,60 165,60" fill="#E2457E"/>
+      <polygon points="15,60 52,60 90,163" fill="#D8326C"/>
+      <polygon points="52,60 90,60 90,163" fill="#F0558A"/>
+      <polygon points="90,60 128,60 90,163" fill="#C2185B"/>
+      <polygon points="128,60 165,60 90,163" fill="#8E0E42"/>
+      <path d="M55,20 L52,60 L90,20 L128,60 L125,20 M15,60 H165 M52,60 L90,163 L128,60 M90,60 L90,163"
+        fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="2"/>
+      <polygon points="55,20 125,20 165,60 90,163 15,60" fill="none" stroke="#3B0B22" stroke-width="5"/>
+      <polygon points="66,28 84,28 62,52" fill="#fff" opacity="0.85"/>
+      <polygon points="88,28 94,28 84,40" fill="#fff" opacity="0.6"/></g></svg>
