@@ -38,7 +38,7 @@ const { values } = parseArgs({
   },
 });
 
-const files = (values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json', 'kit/kit.l2d.json']).map((f) =>
+const files = (values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json', 'kit/kit.l2d.json', 'coin/coin.l2d.json']).map((f) =>
   existsSync(f) ? f : join(root, 'samples', f),
 );
 const outDir = join(root, values.out!);

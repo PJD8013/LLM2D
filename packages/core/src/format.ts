@@ -35,11 +35,13 @@ export interface L2DFile {
 }
 
 export interface L2DImage {
-  /** Path relative to the .l2d.json file. */
+  /** Path of the PNG, relative to the .l2d.json file. Several images may share one atlas page. */
   path: string;
   /** Logical size in skeleton units. The PNG itself may be any resolution (e.g. @2x). */
   width: number;
   height: number;
+  /** Rectangle of the PNG holding this image, in PNG pixels (texture atlases). Omit for a whole PNG. */
+  frame?: { x: number; y: number; width: number; height: number };
 }
 
 export interface L2DBone {

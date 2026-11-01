@@ -14,11 +14,18 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - `packages/motion` — motion presets (`applyPreset`, `describePresets`, `mergeAnimations`); pure TS.
 - `packages/preview` — Node-only renders via Playwright + the viewer: `inspectImage`, `Previewer`
   (`loadFile`, `contactSheet`, `bendSheet`, `frame`).
+- `packages/export` — game export: MaxRects atlas packing with edge extrusion, `resample`, `exportSkeleton`.
+- `packages/svelte` — pixi-svelte components (`Llm2dProvider`, `Llm2dTrack`, `Llm2dBone`). Checked with
+  svelte-check (root tsc excludes it). Imports inside it use `.js` extensions because svelte-package does
+  not rewrite `.ts`.
 - `packages/mcp` — stdio MCP server (`src/server.ts`, tools in `src/tools.ts`, project folders in
   `src/project.ts`). Registered for Claude Code in `.mcp.json`. Server `INSTRUCTIONS` describe the workflow.
 - `apps/viewer` — Vite viewer; also exposes `window.__llm2d` (`loadData`, `seek`, `frame`, `contactSheet`,
   `bendSheet`, ...) for headless use.
 - `samples/bolt|gem/build.ts` — generate original SVG art + rig + animations in code.
+- `samples/coin` — symbol rigged and animated through the MCP tools: `art.ts` (PSD), `rig.json`, `animations.json`.
+- `apps/reel-demo` — Svelte 5 + pixi-svelte 2.1 demo of the Stake integration; `pnpm assets` exports samples
+  with atlases into `public/assets` (gitignored).
 - `samples/kit` — auto-rigged sample: `art.ts` + `make-psd.ts` produce `source/kit.psd`; `rig.json`
   (joints in PSD pixels) and `animations.ts` are the inputs to `pnpm rig build`.
 - `pnpm samples` regenerates every sample's PNGs and `<name>.l2d.json`. Edit the sources, never the
@@ -26,7 +33,7 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - `scripts/` — `build-samples.ts`, `rig.ts` (inspect/build), `render.ts` (contact sheets and
   `--bend` sheets), `validate.ts`, `mcp-call.ts` (call MCP tools over stdio; images go to out/mcp).
 - `docs/format.md` (format spec), `docs/rigging.md` (rigging guide), `docs/mcp.md` (Claude/MCP
-  guide), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
+  guide), `docs/stake.md` (Stake integration), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
 
 ## Conventions
 
@@ -36,7 +43,10 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - Coordinates: y down, degrees, positive rotation clockwise. Attachment geometry is in skeleton
   space at setup pose; bone animation values are relative to setup (rotate/translate add, scale multiplies).
 - Keep the runtime API shaped like spine-ts (`state.setAnimation(track, name, loop)`, `TrackEntry.listener`).
-- Stake web SDK pins pixi.js 8.8.1 and svelte 5.20.5; stay compatible with those.
+- Stake web SDK pins pixi.js 8.8.1, svelte 5.20.5, vite 6.2, spine-pixi-v8 4.2.74; stay compatible
+  (root `pnpm.overrides` pins spine and vite).
+- Runtime packages (core, pixi, svelte) ship `dist/` via `pnpm pack:lib` (`publishConfig` points exports at dist);
+  inside the workspace they resolve to source.
 
 ## Verify changes
 

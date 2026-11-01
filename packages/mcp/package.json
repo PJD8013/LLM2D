@@ -8,6 +8,7 @@
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
     "@llm2d/core": "workspace:*",
+    "@llm2d/export": "workspace:*",
     "@llm2d/motion": "workspace:*",
     "@llm2d/preview": "workspace:*",
     "@llm2d/rig": "workspace:*",

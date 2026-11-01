@@ -75,7 +75,7 @@ claude
 | `render_animation` | 애니메이션 프레임 모음 이미지(디버그 표시 가능) |
 | `render_frame` | 특정 시간의 큰 프레임 한 장 또는 셋업 포즈 |
 | `validate_project` | 파일·이미지 검증 + 구부림 테스트 요약 |
-| `export_project` | `.l2d.json`과 이미지를 게임 에셋 폴더로 복사 |
+| `export_project` | 게임용으로 내보내기: 줄인 `.l2d.json` + 아틀라스 페이지(`scale`로 모바일용 축소) |
 
 ## 모션 프리셋
 

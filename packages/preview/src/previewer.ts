@@ -54,11 +54,11 @@ export class Previewer {
     return this.starting;
   }
 
-  /** Loads a skeleton from memory. `images` maps image names to PNG bytes. */
-  async load(file: L2DFile, images: Record<string, Uint8Array>): Promise<void> {
+  /** Loads a skeleton from memory. `pages` maps each image path in the file to its PNG bytes. */
+  async load(file: L2DFile, pages: Record<string, Uint8Array>): Promise<void> {
     const page = await this.ensure();
     const urls = Object.fromEntries(
-      Object.entries(images).map(([k, v]) => [k, `data:image/png;base64,${Buffer.from(v).toString('base64')}`]),
+      Object.entries(pages).map(([k, v]) => [k, `data:image/png;base64,${Buffer.from(v).toString('base64')}`]),
     );
     await page.evaluate(([json, imgs, label]) => (window as any).__llm2d.loadData(json, imgs, label), [file, urls, file.name] as const);
     this.loadedKey = '';
@@ -73,9 +73,9 @@ export class Previewer {
     const file = JSON.parse(text) as L2DFile;
     const cacheKey = `${path}\u0000${key ?? ''}\u0000${text}`;
     if (cacheKey === this.loadedKey && this.page) return file;
-    const images: Record<string, Uint8Array> = {};
-    for (const [name, img] of Object.entries(file.images ?? {})) images[name] = await readFile(join(dirname(path), img.path));
-    await this.load(file, images);
+    const pages: Record<string, Uint8Array> = {};
+    for (const img of Object.values(file.images ?? {})) pages[img.path] ??= await readFile(join(dirname(path), img.path));
+    await this.load(file, pages);
     this.loadedKey = cacheKey;
     return file;
   }

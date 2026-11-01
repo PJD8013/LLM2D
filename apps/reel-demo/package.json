@@ -1,0 +1,23 @@
+{
+  "name": "@llm2d/reel-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node ../../scripts/export.ts ../../samples/gem/gem.l2d.json ../../samples/coin/coin.l2d.json ../../samples/kit/kit.l2d.json --out public/assets",
+    "dev": "pnpm assets && vite",
+    "build": "pnpm assets && vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@llm2d/svelte": "workspace:*",
+    "pixi-svelte": "2.1.0",
+    "pixi.js": "8.8.1",
+    "svelte": "5.20.5"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "5.0.3",
+    "svelte-check": "4.1.5",
+    "typescript": "5.9.3",
+    "vite": "6.4.5"
+  }
+}

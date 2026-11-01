@@ -11,13 +11,15 @@
     "dev": "pnpm --filter @llm2d/viewer dev",
     "build:viewer": "pnpm --filter @llm2d/viewer build",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @llm2d/svelte --filter @llm2d/reel-demo check",
     "samples": "node scripts/build-samples.ts",
     "validate": "node scripts/validate.ts",
     "render": "node scripts/render.ts",
     "rig": "node scripts/rig.ts",
     "mcp": "node packages/mcp/src/server.ts",
-    "mcp:call": "node scripts/mcp-call.ts"
+    "mcp:call": "node scripts/mcp-call.ts",
+    "export": "node scripts/export.ts",
+    "pack:lib": "node scripts/pack-lib.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -26,5 +28,13 @@
     "vite": "6.4.5",
     "vitest": "3.2.7",
     "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "@esotericsoftware/spine-core": "4.2.74",
+      "@esotericsoftware/spine-pixi-v8": "4.2.74",
+      "pixi-filters": "6.1.0",
+      "vite": "6.4.5"
+    }
   }
 }

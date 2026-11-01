@@ -1,0 +1,63 @@
+{
+  "name": "coin",
+  "art": "source/coin.psd",
+  "scale": 1,
+  "origin": [
+    320,
+    320
+  ],
+  "bones": [
+    {
+      "name": "coin",
+      "from": [
+        320,
+        320
+      ]
+    },
+    {
+      "name": "glow",
+      "parent": "coin",
+      "from": [
+        320,
+        320
+      ]
+    },
+    {
+      "name": "star",
+      "parent": "coin",
+      "from": [
+        320,
+        316
+      ]
+    },
+    {
+      "name": "shine",
+      "parent": "coin",
+      "from": [
+        260,
+        198
+      ]
+    }
+  ],
+  "parts": {
+    "coin": {
+      "bone": "coin"
+    },
+    "flash": {
+      "bone": "coin"
+    },
+    "glow": {
+      "bone": "glow",
+      "alpha": 0
+    },
+    "shine": {
+      "bone": "shine"
+    },
+    "star": {
+      "bone": "star"
+    }
+  },
+  "meta": {
+    "description": "Gold coin symbol, rigged and animated through the LLM2D MCP tools."
+  }
+}

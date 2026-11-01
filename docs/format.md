@@ -53,6 +53,13 @@ LLM2D 스켈레톤 하나는 JSON 파일 하나와 그 파일이 가리키는 �
 `width`/`height`는 스켈레톤 단위의 논리 크기입니다. PNG 해상도는 달라도 됩니다
 (예: 2배 해상도 PNG). 경로는 `.l2d.json` 파일 기준 상대 경로입니다.
 
+텍스처 아틀라스를 쓰면 여러 이미지가 PNG 한 장(페이지)을 함께 쓰고, `frame`으로 그 안의
+영역(PNG 픽셀)을 가리킵니다. `pnpm export`가 아틀라스를 만들 때 자동으로 채웁니다.
+
+```json
+"head": { "path": "kit.png", "width": 253, "height": 189, "frame": { "x": 2, "y": 2, "width": 506, "height": 378 } }
+```
+
 ## bones
 
 ```json

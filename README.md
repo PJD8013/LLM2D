@@ -9,7 +9,7 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
                  (2단계)        (3단계, MCP)            (1단계: 포맷·런타임)       (4단계)
 ```
 
-## 현재 상태: 3단계 완료
+## 현재 상태: 4단계 완료
 
 | 구성 요소 | 위치 | 내용 |
 |---|---|---|
@@ -22,7 +22,10 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
 | Claude 연결 (MCP) | [`packages/mcp`](packages/mcp), [`docs/mcp.md`](docs/mcp.md) | Claude가 리깅·애니메이션·렌더 확인·내보내기를 직접 하는 도구 16개. `.mcp.json`으로 Claude Code에 바로 연결 |
 | 모션 프리셋 | [`packages/motion`](packages/motion) | 심볼(idle, land, win, 기대감, 빅윈 타이틀)과 캐릭터(흔들림, 숨쉬기, 깜빡임, 말하기, 손 흔들기, 점프) 등 16종 |
 | 미리보기 렌더러 | [`packages/preview`](packages/preview) | 헤드리스 브라우저로 그림 확인 이미지, 애니메이션 프레임, 구부림 자세를 PNG로 렌더 |
-| 샘플 | [`samples`](samples) | Bolt(호스트 로봇), Gem(심볼: idle/land/win), Kit(PSD에서 자동 리깅한 여우: 휘는 팔·다리·꼬리·귀·스카프). 모두 원본 그림 |
+| 게임 내보내기 | [`packages/export`](packages/export) | 텍스처 아틀라스 묶기(가장자리 번짐 방지), 모바일용 축소, 줄인 JSON |
+| Stake 연동 | [`packages/svelte`](packages/svelte), [`docs/stake.md`](docs/stake.md) | pixi-svelte용 `Llm2dProvider`/`Llm2dTrack`/`Llm2dBone`, Pixi 에셋 로더, 설치용 tgz(`pnpm pack:lib`) |
+| 릴 데모 | [`apps/reel-demo`](apps/reel-demo) | Svelte 5 + pixi-svelte 5x3 보드. 착지·당첨 애니메이션과 당첨에 반응하는 여우 |
+| 샘플 | [`samples`](samples) | Bolt(호스트 로봇), Gem(심볼: idle/land/win), Kit(PSD에서 자동 리깅한 여우: 휘는 팔·다리·꼬리·귀·스카프), Coin(MCP 도구로 리깅·애니메이션한 금화). 모두 원본 그림 |
 | 렌더 스크립트 | [`scripts/render.ts`](scripts/render.ts) | 헤드리스 브라우저로 애니메이션 프레임이나 구부림 테스트 자세를 한 장에 모아 PNG로 저장. 3단계에서 Claude가 결과를 눈으로 확인하는 데 씀 |
 
 ## 시작하기
@@ -73,7 +76,20 @@ pnpm render --file kit/kit.l2d.json --bend   # 구부림 테스트 자세 이미
 pnpm mcp:call list       # MCP 서버의 도구를 터미널에서 직접 호출
 ```
 
-자동 리깅 사용법은 [`docs/rigging.md`](docs/rigging.md), Claude 연결은 [`docs/mcp.md`](docs/mcp.md)에 있습니다.
+```bash
+pnpm export samples/kit/kit.l2d.json --out out/game   # 게임용 내보내기 (아틀라스)
+```
+
+```bash
+pnpm --filter @llm2d/reel-demo dev   # 릴 데모 실행 (http://localhost:5180)
+```
+
+```bash
+pnpm pack:lib            # Stake 게임에 설치할 tgz 만들기 (out/packages)
+```
+
+자동 리깅 사용법은 [`docs/rigging.md`](docs/rigging.md), Claude 연결은 [`docs/mcp.md`](docs/mcp.md),
+Stake 게임 연동은 [`docs/stake.md`](docs/stake.md)에 있습니다.
 
 `pnpm samples`, `pnpm rig`, `pnpm render`는 Playwright의 Chromium을 씁니다. 처음이면
 `pnpm exec playwright install chromium`을 한 번 실행하세요.
@@ -100,16 +116,16 @@ bolt.state.addListener({
 });
 ```
 
-Stake 웹 SDK의 Spine 사용법(`SpineProvider`, `SpineTrack`)과 같은 모양의 Svelte 5 컴포넌트는
-4단계에서 추가합니다.
+Stake 웹 SDK(pixi-svelte)에서는 Spine 컴포넌트와 같은 모양의 `Llm2dProvider`, `Llm2dTrack`,
+`Llm2dBone`을 씁니다. [`docs/stake.md`](docs/stake.md)를 보세요.
 
 ## 다음 단계
 
 1. ~~포맷, 코어 엔진, PixiJS 8 런타임, 뷰어, 샘플~~ ✅
 2. ~~자동 리깅: PSD 읽기, 메시 생성, 체인 자동 배치, 자동 가중치, 구부림 테스트~~ ✅
 3. ~~Claude 연결: MCP 서버, 모션 프리셋, 렌더 결과를 보며 고치는 반복 과정~~ ✅
-4. **Stake 연동:** 텍스처 아틀라스 패킹, `pixi-svelte`용 Svelte 5 컴포넌트, 릴 심볼 예제
-5. (선택) 평면 그림 한 장 자동 분리, 타임라인 편집 화면
+4. ~~Stake 연동: 텍스처 아틀라스, pixi-svelte 컴포넌트, 릴 데모, 설치용 패키지~~ ✅
+5. (선택) 평면 그림 한 장 자동 분리, 타임라인 편집 화면, 실제 Stake 게임 저장소에 붙여 보기
 
 ## 설계 메모
 

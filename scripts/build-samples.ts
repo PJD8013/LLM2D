@@ -2,13 +2,14 @@
  * Regenerates the sample skeletons.
  * - Code-built samples (bolt, gem): writes each part's SVG source, rasterises it to PNG at 2x
  *   with headless Chromium, writes the .l2d.json and validates it.
- * - Auto-rigged samples (kit): runs the rig pipeline on source/<name>.psd with rig.json and
- *   animations.ts (`pnpm rig build`). The PSD itself comes from make-psd.ts.
+ * - Auto-rigged samples (kit, coin): runs the rig pipeline on source/<name>.psd with rig.json and
+ *   animations.ts or animations.json (`pnpm rig build`). The PSDs come from make-psd.ts / art.ts.
  *
  *   pnpm samples            # all samples
  *   pnpm samples bolt       # one sample
  */
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +20,7 @@ import type { ArtPart } from '../samples/_lib.ts';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCALE = 2;
 const BUILT = ['bolt', 'gem'];
-const RIGGED = ['kit'];
+const RIGGED = ['kit', 'coin'];
 
 const wanted = process.argv.slice(2);
 const names = wanted.length ? wanted : [...BUILT, ...RIGGED];
@@ -32,7 +33,7 @@ for (const name of names) {
     const dir = `samples/${name}`;
     execFileSync(
       process.execPath,
-      ['scripts/rig.ts', 'build', `${dir}/source/${name}.psd`, '--spec', `${dir}/rig.json`, '--animations', `${dir}/animations.ts`, '--out', dir],
+      ['scripts/rig.ts', 'build', `${dir}/source/${name}.psd`, '--spec', `${dir}/rig.json`, '--animations', existsSync(join(root, dir, 'animations.ts')) ? `${dir}/animations.ts` : `${dir}/animations.json`, '--out', dir],
       { cwd: root, stdio: 'inherit' },
     );
     continue;
