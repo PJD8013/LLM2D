@@ -1,0 +1,14 @@
+{
+  "name": "@llm2d/preview",
+  "version": "0.1.0",
+  "description": "Headless previews for LLM2D: art inspection images and viewer renders via Playwright.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@llm2d/core": "workspace:*",
+    "@llm2d/rig": "workspace:*",
+    "playwright": "1.63.0",
+    "vite": "6.4.5"
+  }
+}

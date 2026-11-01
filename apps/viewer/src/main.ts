@@ -51,6 +51,8 @@ let playing = true;
 let zoom = 1;
 let pan = { x: 0, y: 0 };
 let blinkTimer = 2;
+/** Textures created by loadData (destroyed when the next skeleton is loaded that way). */
+let ownedTextures: Texture[] = [];
 
 function showError(message: string | null) {
   ui.error.hidden = !message;
@@ -263,14 +265,13 @@ async function contactSheet(name: string, frames = 8, cell = 256, columns = 4): 
   sheet.width = cell * columns;
   sheet.height = cell * rows;
   const ctx = sheet.getContext('2d')!;
-  const bg = getComputedStyle(ui.stage).backgroundColor;
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : (anim.duration * i) / (frames - 1);
     seek(name, t);
     app.render();
     const x = (i % columns) * cell;
     const y = Math.floor(i / columns) * cell;
-    ctx.fillStyle = bg === 'rgba(0, 0, 0, 0)' ? '#1d2030' : bg;
+    ctx.fillStyle = backgroundColor();
     ctx.fillRect(x, y, cell, cell);
     const src = app.canvas;
     const s = Math.min(cell / src.width, cell / src.height);
@@ -306,7 +307,6 @@ async function bendSheet(cell = 220, stress = false): Promise<string> {
   sheet.width = cell * columns;
   sheet.height = cell * Math.max(1, controls.length);
   const ctx = sheet.getContext('2d')!;
-  const bg = getComputedStyle(ui.stage).backgroundColor;
   const w = app.renderer.width / app.renderer.resolution;
   const h = app.renderer.height / app.renderer.resolution;
   const buf = new Float32Array(8192);
@@ -355,7 +355,7 @@ async function bendSheet(cell = 220, stress = false): Promise<string> {
         }
       const x = col * cell;
       const y = row * cell;
-      ctx.fillStyle = bg === 'rgba(0, 0, 0, 0)' ? '#1d2030' : bg;
+      ctx.fillStyle = backgroundColor();
       ctx.fillRect(x, y, cell, cell);
       const src = app.canvas;
       const k = Math.min(cell / src.width, cell / src.height);
@@ -367,6 +367,55 @@ async function bendSheet(cell = 220, stress = false): Promise<string> {
   a.refresh();
   fit();
   return sheet.toDataURL('image/png');
+}
+
+function backgroundColor(): string {
+  const bg = getComputedStyle(ui.stage).backgroundColor;
+  return bg === 'rgba(0, 0, 0, 0)' ? '#1d2030' : bg;
+}
+
+/** Loads a skeleton from JSON plus images given as data/object URLs (used by headless tools). */
+async function loadData(json: unknown, images: Record<string, string>, label = 'data') {
+  const textures: Record<string, Texture> = {};
+  const fresh: Texture[] = [];
+  try {
+    for (const [name, url] of Object.entries(images)) {
+      const blob = await (await fetch(url)).blob();
+      const t = Texture.from(await createImageBitmap(blob));
+      textures[name] = t;
+      fresh.push(t);
+    }
+    setActor(fromLoaded(json, textures), label);
+  } catch (e) {
+    for (const t of fresh) t.destroy(true);
+    throw e;
+  }
+  for (const t of ownedTextures) t.destroy(true);
+  ownedTextures = fresh;
+  setPlaying(false);
+  return api.info();
+}
+
+/** One frame (setup pose when `name` is null) composited on the background, as a PNG data URL. */
+function frame(name: string | null, time = 0): string {
+  if (!actor) throw new Error('No skeleton loaded');
+  if (name) seek(name, time);
+  else {
+    setPlaying(false);
+    actor.state.clearTracks();
+    actor.skeleton.setToSetupPose();
+    actor.refresh();
+  }
+  app.render();
+  const src = app.canvas;
+  const out = document.createElement('canvas');
+  out.width = src.width;
+  out.height = src.height;
+  const ctx = out.getContext('2d')!;
+  ctx.fillStyle = backgroundColor();
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(src, 0, 0);
+  return out.toDataURL('image/png');
 }
 
 function seek(name: string, time: number) {
@@ -388,8 +437,14 @@ const api = {
     play(name);
   },
   seek,
+  frame,
+  loadData,
   contactSheet,
   bendSheet,
+  setBackground: (bg: string) => {
+    ui.bg.value = ui.stage.dataset.bg = bg;
+  },
+  resize: () => app.resize(),
   debug: (on: boolean) => {
     ui.dbgBones.checked = ui.dbgMeshes.checked = ui.dbgIk.checked = on;
     applyDebug();

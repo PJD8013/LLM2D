@@ -1,0 +1,10 @@
+{
+  "name": "@llm2d/motion",
+  "version": "0.1.0",
+  "description": "Motion presets for LLM2D: slot symbol states and character motions as keyframes.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": { ".": "./src/index.ts" },
+  "sideEffects": false,
+  "dependencies": { "@llm2d/core": "workspace:*" }
+}

@@ -75,6 +75,7 @@ pnpm rig inspect samples/kit/source/kit.psd
 | `softness` | 관절이 섞이는 거리(PSD 픽셀). 작을수록 관절이 또렷함. 기본 정점 간격의 0.75배 |
 | `smooth` | 가중치 다듬기 횟수. 기본 2 |
 | `blend` | `normal`, `add`, `multiply`, `screen` |
+| `alpha` | 셋업 포즈의 불투명도(0~1). 빛·번쩍임·반짝임처럼 애니메이션이 나타나게 할 레이어는 0. PSD에서 숨긴 레이어를 `parts`에 적으면(`slot` 없이) 기본 0인 효과 슬롯이 됨 |
 | `skip` | 이 레이어 제외 |
 
 `parts`에 없는 레이어는 자동으로 정합니다. 뼈가 레이어 그림을 지나가면 그 뼈들로 메시를

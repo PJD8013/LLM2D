@@ -1,0 +1,109 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { AnimationState, Skeleton, SkeletonData, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
+import { PRESETS, applyPreset, describePresets, mergeAnimations } from '../src/index.ts';
+
+const root = join(import.meta.dirname, '../../..');
+const load = (name: string): L2DFile => JSON.parse(readFileSync(join(root, 'samples', name, `${name}.l2d.json`), 'utf8'));
+
+const kitParams: Record<string, Record<string, unknown>> = {
+  sway: { bones: ['tail1', 'tail2', 'tail3', 'tail4'] },
+  breathe: { bone: 'hip' },
+  blink: { slot: 'eyes', closed: 'eyes_closed', times: [0.5, 2] },
+  talk: { slot: 'mouth', open: 'mouth_open', head: 'head' },
+  nod: { bone: 'head' },
+  wave: { upper: 'upper_arm_r', forearm: 'forearm_r', hand: 'hand_r' },
+  jump: { hip: 'hip', feet: ['foot_l_ik', 'foot_r_ik'], arms: ['upper_arm_l', 'upper_arm_r'] },
+  fade: { slots: ['eyes'] },
+};
+const gemParams: Record<string, Record<string, unknown>> = {
+  symbol_win: { glow: 'glow', glowBone: 'glow', flash: 'gem_flash', sparkle: 'sparkle', sparkleBone: 'sparkle' },
+  symbol_land: { flash: 'gem_flash' },
+  big_win_title: { slots: ['gem'] },
+  pop_in: { slots: ['gem'] },
+  fade: { slots: ['glow'], from: 0, to: 1 },
+};
+
+function withAnimation(file: L2DFile, name: string, anim: L2DAnimation): L2DFile {
+  return { ...file, animations: { ...file.animations, [name]: anim } };
+}
+
+function playThrough(file: L2DFile, name: string) {
+  const data = SkeletonData.fromJSON(file);
+  const sk = new Skeleton(data);
+  const state = new AnimationState(data);
+  state.setAnimation(0, name, false);
+  const out = new Float32Array(8192);
+  for (let i = 0; i < 90; i++) {
+    state.update(1 / 30);
+    state.apply(sk);
+    sk.updateWorldTransform();
+    for (let s = 0; s < data.slots.length; s++) {
+      const n = sk.computeSlotVertices(s, out);
+      for (let k = 0; k < n * 2; k++) if (!Number.isFinite(out[k])) throw new Error(`NaN in ${name}`);
+    }
+  }
+}
+
+describe('presets', () => {
+  for (const preset of PRESETS) {
+    const useKit = preset.category === 'character' || preset.name in kitParams && !(preset.name in gemParams);
+    const sample = useKit ? 'kit' : 'gem';
+    const params = (useKit ? kitParams : gemParams)[preset.name] ?? {};
+    it(`${preset.name} produces a valid animation on ${sample}`, () => {
+      const file = load(sample);
+      const anim = applyPreset(SkeletonData.fromJSON(file), preset.name, params);
+      const merged = withAnimation(file, 'test', anim);
+      const r = validate(merged);
+      expect(r.errors).toEqual([]);
+      playThrough(merged, 'test');
+      if (preset.loops) {
+        // Loops end where they start (timelines that span the loop seam, i.e. start at 0).
+        for (const tl of Object.values(anim.bones ?? {}))
+          for (const keys of [tl.rotate, tl.translate, tl.scale]) {
+            if (!keys || keys.length < 2 || keys[0].time > 0) continue;
+            expect(keys[keys.length - 1]).toMatchObject(Object.fromEntries(Object.entries(keys[0]).filter(([k]) => k !== 'time' && k !== 'curve')));
+          }
+      }
+    });
+  }
+
+  it('reports unknown bones, params and attachments helpfully', () => {
+    const data = SkeletonData.fromJSON(load('kit'));
+    expect(() => applyPreset(data, 'sway', { bones: ['tail9'] })).toThrow(/unknown bone "tail9". Bones: root, hip/);
+    expect(() => applyPreset(data, 'sway', { bones: ['tail1'], speed: 2 })).toThrow(/no parameter "speed"/);
+    expect(() => applyPreset(data, 'blink', { slot: 'eyes', closed: 'shut' })).toThrow(/Attachments: eyes, eyes_closed/);
+    expect(() => applyPreset(data, 'wobble')).toThrow(/Unknown preset "wobble"/);
+  });
+
+  it('defaults the bone to the main art and shifts by start', () => {
+    const data = SkeletonData.fromJSON(load('gem'));
+    const anim = applyPreset(data, 'symbol_land', { start: 0.5 });
+    expect(Object.keys(anim.bones!)).toEqual(['gem']);
+    expect(anim.bones!.gem.translate![0].time).toBe(0.5);
+    expect(anim.events![0]).toMatchObject({ name: 'land', time: 0.62 });
+  });
+
+  it('raises arms outward on both sides', () => {
+    const data = SkeletonData.fromJSON(load('kit'));
+    const right = applyPreset(data, 'wave', { upper: 'upper_arm_r', forearm: 'forearm_r' });
+    const left = applyPreset(data, 'wave', { upper: 'upper_arm_l', forearm: 'forearm_l' });
+    expect(right.bones!.upper_arm_r.rotate![1].value).toBeLessThan(0);
+    expect(left.bones!.upper_arm_l.rotate![1].value).toBeGreaterThan(0);
+  });
+
+  it('merges presets into one animation', () => {
+    const data = SkeletonData.fromJSON(load('kit'));
+    let idle = applyPreset(data, 'breathe', { bone: 'hip' });
+    idle = mergeAnimations(idle, applyPreset(data, 'sway', { bones: ['tail1', 'tail2'] }));
+    idle = mergeAnimations(idle, applyPreset(data, 'blink', { slot: 'eyes', closed: 'eyes_closed', times: [1.5] }));
+    expect(Object.keys(idle.bones!).sort()).toEqual(['hip', 'tail1', 'tail2']);
+    expect(idle.slots!.eyes.attachment).toHaveLength(2);
+  });
+
+  it('describes every preset', () => {
+    const text = describePresets();
+    for (const p of PRESETS) expect(text).toContain(p.name);
+  });
+});

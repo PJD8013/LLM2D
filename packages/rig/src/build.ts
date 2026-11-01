@@ -66,6 +66,11 @@ export interface RigPart {
   /** Weight smoothing passes. Default 2. */
   smooth?: number;
   blend?: BlendMode;
+  /**
+   * Opacity at setup pose, 0..1. Default: the layer's opacity, or 0 for a layer hidden in the
+   * art (hidden layers listed in parts become effects that animations fade in).
+   */
+  alpha?: number;
   /** Leave the layer out. */
   skip?: boolean;
 }
@@ -157,11 +162,15 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
 
     let slotName = part.slot ? safeName(part.slot) : layer.name;
     let auto = !spec.parts?.[layer.name];
-    if (layer.hidden && !part.slot) {
+    // A hidden layer listed in parts without a slot is an effect layer: its own slot, invisible at setup.
+    const hiddenEffect = layer.hidden && !part.slot && !!spec.parts?.[layer.name];
+    if (layer.hidden && !part.slot && !hiddenEffect) {
       // Alternate art: "eyes_closed" goes into slot "eyes" if that exists.
       const base = slots.find((sl) => layer.name.startsWith(`${sl.name}_`));
       if (!base) {
-        warnings.push(`${layer.name}: hidden layer skipped (give it a "slot" to use it as alternate art)`);
+        warnings.push(
+          `${layer.name}: hidden layer skipped (list it in parts to use it as an effect that starts invisible, or give it a "slot" to use it as alternate art)`,
+        );
         continue;
       }
       slotName = base.name;
@@ -227,10 +236,11 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
     }
 
     if (!existing) {
-      const slot: L2DSlot = { name: slotName, bone: boneNames[0], attachment: layer.hidden ? null : imgName };
+      const slot: L2DSlot = { name: slotName, bone: boneNames[0], attachment: layer.hidden && !hiddenEffect ? null : imgName };
       const blend = part.blend ?? layer.blend;
       if (blend !== 'normal') slot.blend = blend;
-      if (layer.opacity < 1) slot.color = `ffffff${Math.round(layer.opacity * 255).toString(16).padStart(2, '0')}`;
+      const alpha = Math.min(1, Math.max(0, part.alpha ?? (hiddenEffect ? 0 : layer.opacity)));
+      if (alpha < 1) slot.color = `ffffff${Math.round(alpha * 255).toString(16).padStart(2, '0')}`;
       slots.push(slot);
     } else if (existing.attachment == null && !layer.hidden) existing.attachment = imgName;
     (attachments[slotName] ??= {})[imgName] = attachment;

@@ -463,7 +463,8 @@ export class SkeletonData {
     let maxX = -Infinity;
     let maxY = -Infinity;
     this.slots.forEach((s) => {
-      if (s.attachment < 0) return;
+      // Effects that start invisible (glows, flashes) should not inflate the framing.
+      if (s.attachment < 0 || s.color.a <= 0) return;
       const v = this.attachments[s.index][s.attachment].vertices;
       for (let i = 0; i < v.length; i += 2) {
         minX = Math.min(minX, v[i]);

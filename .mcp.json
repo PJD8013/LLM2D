@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "llm2d": {
+      "command": "node",
+      "args": ["packages/mcp/src/server.ts"]
+    }
+  }
+}

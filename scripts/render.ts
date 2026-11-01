@@ -7,7 +7,7 @@
  *   pnpm render --file bolt/bolt.l2d.json --anim cheer --frames 12 --debug
  *
  * Options:
- *   --file <path>    .l2d.json path under samples/ (repeatable). Default: all samples.
+ *   --file <path>    .l2d.json file; a path under samples/ or any path (repeatable). Default: all samples.
  *   --anim <name>    animation to render (repeatable). Default: all.
  *   --frames <n>     frames per sheet (default 8)
  *   --cell <px>      cell size (default 256)
@@ -16,12 +16,12 @@
  *   --bend           render the bend test poses instead of animations (--stress adds extreme poses)
  *   --out <dir>      output folder (default out/renders)
  */
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { Previewer, closeBrowser } from '../packages/preview/src/index.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { values } = parseArgs({
@@ -38,59 +38,33 @@ const { values } = parseArgs({
   },
 });
 
-const files = values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json', 'kit/kit.l2d.json'];
-const frames = Number(values.frames);
-const cell = Number(values.cell);
+const files = (values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json', 'kit/kit.l2d.json']).map((f) =>
+  existsSync(f) ? f : join(root, 'samples', f),
+);
 const outDir = join(root, values.out!);
 await mkdir(outDir, { recursive: true });
+const background = values.bg as 'dark' | 'light' | 'checker';
+const cell = Number(values.cell);
 
-const server = await createServer({
-  root: join(root, 'apps/viewer'),
-  configFile: join(root, 'apps/viewer/vite.config.ts'),
-  server: { port: 0, host: '127.0.0.1' },
-  logLevel: 'error',
-});
-await server.listen();
-const address = server.httpServer!.address();
-const port = typeof address === 'object' && address ? address.port : 5173;
-
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const previewer = new Previewer();
 try {
-  const page = await browser.newPage({ viewport: { width: 640, height: 640 } });
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-
-  for (const file of files) {
-    const query = new URLSearchParams({ headless: '1', file, bg: values.bg! });
-    if (values.debug) query.set('debug', '1');
-    await page.goto(`http://127.0.0.1:${port}/?${query}`);
-    await page.waitForSelector('body[data-ready="true"]', { timeout: 30000 });
-    const info = await page.evaluate(() => (window as any).__llm2d.info());
-    if (!info) throw new Error(`Failed to load ${file}: ${errors.join('\n')}`);
+  for (const path of files) {
+    const file = await previewer.loadFile(path);
     if (values.bend) {
-      const dataUrl: string = await page.evaluate(
-        ([c, st]) => (window as any).__llm2d.bendSheet(c, st),
-        [cell, values.stress] as const,
-      );
-      const name = `${info.name}-bend${values.stress ? '-stress' : ''}${values.debug ? '-debug' : ''}.png`;
-      await writeFile(join(outDir, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
+      const png = await previewer.bendSheet({ cell, stress: values.stress, debug: values.debug, background });
+      const name = `${file.name}-bend${values.stress ? '-stress' : ''}${values.debug ? '-debug' : ''}.png`;
+      await writeFile(join(outDir, name), png);
       console.log(`wrote ${join(values.out!, name)}`);
       continue;
     }
-    const anims: string[] = values.anim ?? info.animations.map((a: { name: string }) => a.name);
-    for (const anim of anims) {
-      const dataUrl: string = await page.evaluate(
-        ([a, f, c]) => (window as any).__llm2d.contactSheet(a, f, c),
-        [anim, frames, cell] as const,
-      );
-      const name = `${info.name}-${anim}${values.debug ? '-debug' : ''}.png`;
-      await writeFile(join(outDir, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
+    for (const anim of values.anim ?? Object.keys(file.animations)) {
+      const png = await previewer.contactSheet(anim, { frames: Number(values.frames), cell, debug: values.debug, background });
+      const name = `${file.name}-${anim}${values.debug ? '-debug' : ''}.png`;
+      await writeFile(join(outDir, name), png);
       console.log(`wrote ${join(values.out!, name)}`);
     }
   }
-  if (errors.length) console.warn(`page errors:\n${errors.join('\n')}`);
 } finally {
-  await browser.close();
-  await server.close();
+  await previewer.close();
+  await closeBrowser();
 }
