@@ -13,6 +13,7 @@
  *   --cell <px>      cell size (default 256)
  *   --bg <dark|light|checker>
  *   --debug          draw bones, meshes and IK targets
+ *   --bend           render the bend test poses instead of animations (--stress adds extreme poses)
  *   --out <dir>      output folder (default out/renders)
  */
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -31,11 +32,13 @@ const { values } = parseArgs({
     cell: { type: 'string', default: '256' },
     bg: { type: 'string', default: 'dark' },
     debug: { type: 'boolean', default: false },
+    bend: { type: 'boolean', default: false },
+    stress: { type: 'boolean', default: false },
     out: { type: 'string', default: 'out/renders' },
   },
 });
 
-const files = values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json'];
+const files = values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json', 'kit/kit.l2d.json'];
 const frames = Number(values.frames);
 const cell = Number(values.cell);
 const outDir = join(root, values.out!);
@@ -65,6 +68,16 @@ try {
     await page.waitForSelector('body[data-ready="true"]', { timeout: 30000 });
     const info = await page.evaluate(() => (window as any).__llm2d.info());
     if (!info) throw new Error(`Failed to load ${file}: ${errors.join('\n')}`);
+    if (values.bend) {
+      const dataUrl: string = await page.evaluate(
+        ([c, st]) => (window as any).__llm2d.bendSheet(c, st),
+        [cell, values.stress] as const,
+      );
+      const name = `${info.name}-bend${values.stress ? '-stress' : ''}${values.debug ? '-debug' : ''}.png`;
+      await writeFile(join(outDir, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
+      console.log(`wrote ${join(values.out!, name)}`);
+      continue;
+    }
     const anims: string[] = values.anim ?? info.animations.map((a: { name: string }) => a.name);
     for (const anim of anims) {
       const dataUrl: string = await page.evaluate(

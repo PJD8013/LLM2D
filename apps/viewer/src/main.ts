@@ -1,5 +1,5 @@
 import { Application, Container, Texture } from 'pixi.js';
-import { validate, type TrackEntry } from '@llm2d/core';
+import { bendPoses, validate, type TrackEntry } from '@llm2d/core';
 import { Llm2dActor, fromLoaded, loadLlm2d, type LoadedLlm2d } from '@llm2d/pixi';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -275,15 +275,97 @@ async function contactSheet(name: string, frames = 8, cell = 256, columns = 4): 
     const src = app.canvas;
     const s = Math.min(cell / src.width, cell / src.height);
     ctx.drawImage(src, x + (cell - src.width * s) / 2, y + (cell - src.height * s) / 2, src.width * s, src.height * s);
-    const label = `${name} ${t.toFixed(2)}s`;
-    ctx.font = '600 13px system-ui, sans-serif';
-    ctx.fillStyle = '#000000aa';
-    ctx.fillRect(x + 4, y + 4, ctx.measureText(label).width + 10, 20);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(label, x + 9, y + 18);
-    ctx.strokeStyle = '#00000055';
-    ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+    drawLabel(ctx, `${name} ${t.toFixed(2)}s`, x, y, cell);
   }
+  return sheet.toDataURL('image/png');
+}
+
+function drawLabel(ctx: CanvasRenderingContext2D, label: string, x: number, y: number, cell: number, color = '#ffffff') {
+  ctx.font = '600 13px system-ui, sans-serif';
+  ctx.fillStyle = '#000000aa';
+  ctx.fillRect(x + 4, y + 4, ctx.measureText(label).width + 10, 20);
+  ctx.fillStyle = color;
+  ctx.fillText(label, x + 9, y + 18);
+  ctx.strokeStyle = '#00000055';
+  ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+}
+
+/**
+ * Renders the bend test poses: one row per control (bone or IK chain), zoomed on the
+ * meshes that bend. Cells whose mesh folds in the bend test are labelled red.
+ */
+async function bendSheet(cell = 220, stress = false): Promise<string> {
+  if (!actor) throw new Error('No skeleton loaded');
+  const a = actor;
+  setPlaying(false);
+  a.state.clearTracks();
+  const poses = bendPoses(a.data).filter((p) => stress || p.hard);
+  const controls = [...new Set(poses.map((p) => p.control))];
+  const columns = 1 + Math.max(1, ...controls.map((c) => poses.filter((p) => p.control === c).length));
+  const sheet = document.createElement('canvas');
+  sheet.width = cell * columns;
+  sheet.height = cell * Math.max(1, controls.length);
+  const ctx = sheet.getContext('2d')!;
+  const bg = getComputedStyle(ui.stage).backgroundColor;
+  const w = app.renderer.width / app.renderer.resolution;
+  const h = app.renderer.height / app.renderer.resolution;
+  const buf = new Float32Array(8192);
+  controls.forEach((control, row) => {
+    const list = poses.filter((p) => p.control === control);
+    // Frame the setup-pose bounds of the meshes this control bends.
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [slot, index] of list[0].meshes) {
+      const v = a.data.attachments[slot][index].vertices;
+      for (let i = 0; i < v.length; i += 2) {
+        minX = Math.min(minX, v[i]);
+        maxX = Math.max(maxX, v[i]);
+        minY = Math.min(minY, v[i + 1]);
+        maxY = Math.max(maxY, v[i + 1]);
+      }
+    }
+    if (!Number.isFinite(minX)) ({ x: minX, y: minY } = a.data.bounds), (maxX = minX + a.data.bounds.width), (maxY = minY + a.data.bounds.height);
+    const pad = Math.max(maxX - minX, maxY - minY) * 0.35;
+    const s = Math.min(w / (maxX - minX + pad * 2), h / (maxY - minY + pad * 2));
+    view.scale.set(s);
+    view.position.set(w / 2 - ((minX + maxX) / 2) * s, h / 2 - ((minY + maxY) / 2) * s);
+    [null, ...list].forEach((p, col) => {
+      a.skeleton.setToSetupPose();
+      p?.apply(a.skeleton);
+      a.refresh();
+      app.render();
+      // Fold check for the label colour.
+      let folded = false;
+      if (p)
+        for (const [slot, index] of p.meshes) {
+          const mesh = a.data.attachments[slot][index];
+          a.skeleton.attachments[slot] = index;
+          a.skeleton.computeSlotVertices(slot, buf);
+          const v0 = mesh.vertices;
+          const t = mesh.triangles;
+          for (let i = 0; i < t.length && !folded; i += 3) {
+            const area = (v: Float32Array) =>
+              (v[t[i + 1] * 2] - v[t[i] * 2]) * (v[t[i + 2] * 2 + 1] - v[t[i] * 2 + 1]) -
+              (v[t[i + 2] * 2] - v[t[i] * 2]) * (v[t[i + 1] * 2 + 1] - v[t[i] * 2 + 1]);
+            const a0 = area(v0);
+            if (Math.abs(a0) > 1e-3 && area(buf) / a0 <= 0) folded = true;
+          }
+        }
+      const x = col * cell;
+      const y = row * cell;
+      ctx.fillStyle = bg === 'rgba(0, 0, 0, 0)' ? '#1d2030' : bg;
+      ctx.fillRect(x, y, cell, cell);
+      const src = app.canvas;
+      const k = Math.min(cell / src.width, cell / src.height);
+      ctx.drawImage(src, x + (cell - src.width * k) / 2, y + (cell - src.height * k) / 2, src.width * k, src.height * k);
+      drawLabel(ctx, p ? `${control} ${p.pose}` : `${control} setup`, x, y, cell, folded ? '#ff6b6b' : '#ffffff');
+    });
+  });
+  a.skeleton.setToSetupPose();
+  a.refresh();
+  fit();
   return sheet.toDataURL('image/png');
 }
 
@@ -307,6 +389,7 @@ const api = {
   },
   seek,
   contactSheet,
+  bendSheet,
   debug: (on: boolean) => {
     ui.dbgBones.checked = ui.dbgMeshes.checked = ui.dbgIk.checked = on;
     applyDebug();
@@ -320,6 +403,7 @@ const api = {
 (window as unknown as { __llm2d: typeof api }).__llm2d = api;
 
 const initial = params.get('file') ?? ui.sample.value;
+if ([...ui.sample.options].some((o) => o.value === initial)) ui.sample.value = initial;
 if (params.get('bg')) ui.bg.value = ui.stage.dataset.bg = params.get('bg')!;
 if (params.has('debug')) api.debug(true);
 await loadUrl(initial);

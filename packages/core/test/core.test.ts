@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AnimationState,
   EASINGS,
+  bendTest,
   Skeleton,
   SkeletonData,
   cubicBezier,
@@ -269,5 +270,31 @@ describe('animation', () => {
     const [x, y] = sk.boneWorldTip(data.findBone('lower'));
     close(x, 70, 1e-2);
     close(y, 40, 1e-2);
+  });
+});
+
+describe('bend test', () => {
+  it('passes a well-weighted mesh and catches folding weights', () => {
+    const good = SkeletonData.fromJSON(armFile());
+    const report = bendTest(good, { angles: [45], stress: [] });
+    expect(report.tested.map((t) => t.control)).toContain('lower');
+    expect(report.ok).toBe(true);
+
+    // Scrambled weights: the top and bottom edges follow different bones, so the strip tears.
+    const f = armFile();
+    const strip = f.attachments.strip.strip as any;
+    strip.weights = [[0, 1], [1, 1], [0, 1], [1, 1], [0, 1], [1, 1]];
+    const bad = bendTest(SkeletonData.fromJSON(f), { angles: [45], stress: [] });
+    expect(bad.ok).toBe(false);
+    expect(bad.issues[0].message).toMatch(/fold over/);
+  });
+
+  it('checks IK chains by moving their targets', () => {
+    const f = armFile();
+    f.ik![0].mix = 1;
+    const report = bendTest(SkeletonData.fromJSON(f));
+    expect(report.tested.find((t) => t.control === 'arm_ik')?.poses).toEqual(
+      expect.arrayContaining(['crouch 20%', 'swing -20°', 'swing +20°']),
+    );
   });
 });

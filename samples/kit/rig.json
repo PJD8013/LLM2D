@@ -1,0 +1,55 @@
+{
+  "name": "kit",
+  "scale": 0.5,
+  "origin": [600, 1544],
+  "meta": { "description": "Fox host rigged automatically from source/kit.psd by @llm2d/rig." },
+  "bones": [
+    { "name": "hip", "from": [600, 1150], "to": [600, 1090] },
+    { "name": "torso", "parent": "hip", "from": [600, 1090], "to": [600, 770] },
+    { "name": "neck", "parent": "torso", "from": [600, 770], "to": [600, 700] },
+    { "name": "head", "parent": "neck", "from": [600, 700], "to": [600, 380] },
+
+    { "name": "ear_l1", "parent": "head", "from": [480, 432], "to": [452, 320] },
+    { "name": "ear_l2", "parent": "ear_l1", "from": [452, 320], "to": [412, 200] },
+    { "name": "ear_r1", "parent": "head", "from": [720, 432], "to": [748, 320] },
+    { "name": "ear_r2", "parent": "ear_r1", "from": [748, 320], "to": [788, 200] },
+
+    { "name": "upper_arm_l", "parent": "torso", "from": [472, 784], "to": [428, 932] },
+    { "name": "forearm_l", "parent": "upper_arm_l", "from": [428, 932], "to": [396, 1064] },
+    { "name": "hand_l", "parent": "forearm_l", "from": [396, 1064], "to": [386, 1130] },
+    { "name": "upper_arm_r", "parent": "torso", "from": [728, 784], "to": [772, 932] },
+    { "name": "forearm_r", "parent": "upper_arm_r", "from": [772, 932], "to": [804, 1064] },
+    { "name": "hand_r", "parent": "forearm_r", "from": [804, 1064], "to": [814, 1130] },
+
+    { "name": "thigh_l", "parent": "hip", "from": [524, 1120], "to": [524, 1300] },
+    { "name": "shin_l", "parent": "thigh_l", "from": [524, 1300], "to": [524, 1476] },
+    { "name": "foot_l_ik", "from": [524, 1476] },
+    { "name": "foot_l", "parent": "foot_l_ik", "from": [524, 1484], "to": [470, 1516] },
+    { "name": "thigh_r", "parent": "hip", "from": [676, 1120], "to": [676, 1300] },
+    { "name": "shin_r", "parent": "thigh_r", "from": [676, 1300], "to": [676, 1476] },
+    { "name": "foot_r_ik", "from": [676, 1476] },
+    { "name": "foot_r", "parent": "foot_r_ik", "from": [676, 1484], "to": [730, 1516] }
+  ],
+  "chains": [
+    { "layer": "tail", "prefix": "tail", "count": 4, "parent": "hip", "start": [700, 1184] },
+    { "layer": "scarf", "prefix": "scarf", "count": 2, "parent": "neck", "start": [672, 792], "end": [704, 930] }
+  ],
+  "parts": {
+    "tail": { "bones": ["tail1", "tail2", "tail3", "tail4"] },
+    "ear_l": { "bones": ["ear_l1", "ear_l2"] },
+    "ear_r": { "bones": ["ear_r1", "ear_r2"] },
+    "arm_l": { "bones": ["upper_arm_l", "forearm_l", "hand_l"] },
+    "arm_r": { "bones": ["upper_arm_r", "forearm_r", "hand_r"] },
+    "leg_l": { "bones": ["thigh_l", "shin_l", "foot_l"] },
+    "leg_r": { "bones": ["thigh_r", "shin_r", "foot_r"] },
+    "body": { "bones": ["hip", "torso"] },
+    "scarf": { "bones": ["neck", "scarf1", "scarf2"] },
+    "head": { "bone": "head" },
+    "eyes": { "bone": "head" },
+    "mouth": { "bone": "head" }
+  },
+  "ik": [
+    { "name": "leg_l", "bones": ["thigh_l", "shin_l"], "target": "foot_l_ik", "bendPositive": false },
+    { "name": "leg_r", "bones": ["thigh_r", "shin_r"], "target": "foot_r_ik", "bendPositive": true }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@llm2d/rig",
+  "version": "0.1.0",
+  "description": "Automatic rigging for LLM2D: layered art (PSD) to meshes, bones and weights.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@llm2d/core": "workspace:*",
+    "@kninnug/constrainautor": "4.1.0",
+    "ag-psd": "31.0.3",
+    "delaunator": "5.1.0",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "@types/pngjs": "6.0.5"
+  }
+}

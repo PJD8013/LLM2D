@@ -3,7 +3,7 @@
  * world (canvas) coordinates, the way an artist or an LLM thinks about it, and convert to
  * the file's parent-local bone transforms.
  */
-import type { L2DBone, L2DMeshAttachment } from '../packages/core/src/index.ts';
+import type { L2DMeshAttachment } from '../packages/core/src/index.ts';
 
 export interface ArtPart {
   /** Logical size in skeleton units. */
@@ -13,47 +13,8 @@ export interface ArtPart {
   svg: string;
 }
 
-export interface WorldBone {
-  name: string;
-  parent?: string;
-  x: number;
-  y: number;
-  /** World angle in degrees (0 = right, 90 = down, -90 = up). */
-  angle?: number;
-  length?: number;
-}
-
-/** Converts bones placed in world space (setup pose, unscaled) to parent-local bones. */
-export function bonesFromWorld(list: WorldBone[]): L2DBone[] {
-  const byName = new Map<string, WorldBone>();
-  return list.map((b) => {
-    byName.set(b.name, b);
-    const angle = b.angle ?? 0;
-    const out: L2DBone = { name: b.name };
-    if (b.parent) {
-      const p = byName.get(b.parent);
-      if (!p) throw new Error(`Parent ${b.parent} of ${b.name} must come first`);
-      const pa = ((p.angle ?? 0) * Math.PI) / 180;
-      const dx = b.x - p.x;
-      const dy = b.y - p.y;
-      out.parent = b.parent;
-      out.x = round(Math.cos(-pa) * dx - Math.sin(-pa) * dy);
-      out.y = round(Math.sin(-pa) * dx + Math.cos(-pa) * dy);
-      out.rotation = round(angle - (p.angle ?? 0));
-    } else {
-      out.x = b.x;
-      out.y = b.y;
-      out.rotation = angle;
-    }
-    if (b.length) out.length = b.length;
-    return out;
-  });
-}
-
-export const round = (v: number, d = 3) => {
-  const r = Math.round(v * 10 ** d) / 10 ** d;
-  return Object.is(r, -0) ? 0 : r;
-};
+export { bonesFromWorld, round, type WorldBone } from '../packages/rig/src/bones.ts';
+import { round } from '../packages/rig/src/bones.ts';
 
 /**
  * A strip mesh covering an image placed at (cx, cy) with size w x h, split into `rows`
