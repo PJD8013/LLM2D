@@ -6,3 +6,4 @@ export * from './animationState.ts';
 export { EASINGS, CURVE_NAMES, cubicBezier, resolveCurve, type EaseFn } from './curves.ts';
 export { parseColor, toHex, isHexColor, type RGBA } from './color.ts';
 export * as math from './math.ts';
+export { bendTest, bendPoses, type BendIssue, type BendPose, type BendReport, type BendTestOptions } from './bendTest.ts';

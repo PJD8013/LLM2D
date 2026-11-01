@@ -6,7 +6,7 @@ import { AnimationState, Skeleton, SkeletonData, validate } from '../src/index.t
 const root = join(import.meta.dirname, '../../..');
 const load = (name: string) => JSON.parse(readFileSync(join(root, 'samples', name, `${name}.l2d.json`), 'utf8'));
 
-describe.each(['bolt', 'gem'])('sample %s', (name) => {
+describe.each(['bolt', 'gem', 'kit'])('sample %s', (name) => {
   it('validates without errors or warnings', () => {
     const r = validate(load(name));
     expect(r.errors).toEqual([]);

@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "samples": "node scripts/build-samples.ts",
     "validate": "node scripts/validate.ts",
-    "render": "node scripts/render.ts"
+    "render": "node scripts/render.ts",
+    "rig": "node scripts/rig.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

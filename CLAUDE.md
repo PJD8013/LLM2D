@@ -8,11 +8,19 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - `packages/core` — format types, validator, compiled `SkeletonData`, `Skeleton` (world transforms,
   IK, skinning), `AnimationState` (tracks, mixing, queue, events). No DOM, runs in Node.
 - `packages/pixi` — `Llm2dActor` (PixiJS 8 `Mesh` per slot, CPU skinning) and `loadLlm2d`.
+- `packages/rig` — Node-only auto-rigging: `readPsd`, contour + constrained Delaunay `buildMesh`,
+  medial-axis `chainJoints`, geodesic `computeWeights`, `buildRig(art, spec)`. `bendTest`/`bendPoses`
+  live in core so the viewer can use them.
 - `apps/viewer` — Vite viewer; also exposes `window.__llm2d` (`seek`, `contactSheet`, ...) for headless use.
-- `samples/<name>/build.ts` — generates original SVG art + rig + animations; `pnpm samples` writes
-  PNGs (@2x) and `<name>.l2d.json`. Edit build.ts, never the generated JSON/PNGs by hand.
-- `scripts/` — `build-samples.ts`, `render.ts` (contact sheets via Playwright), `validate.ts`.
-- `docs/format.md` — format spec (Korean). Keep it in sync with `packages/core/src/format.ts`.
+- `samples/bolt|gem/build.ts` — generate original SVG art + rig + animations in code.
+- `samples/kit` — auto-rigged sample: `art.ts` + `make-psd.ts` produce `source/kit.psd`; `rig.json`
+  (joints in PSD pixels) and `animations.ts` are the inputs to `pnpm rig build`.
+- `pnpm samples` regenerates every sample's PNGs and `<name>.l2d.json`. Edit the sources, never the
+  generated JSON/PNGs by hand.
+- `scripts/` — `build-samples.ts`, `rig.ts` (inspect/build), `render.ts` (contact sheets and
+  `--bend` sheets via Playwright), `validate.ts`.
+- `docs/format.md` (format spec) and `docs/rigging.md` (rigging guide), both Korean. Keep
+  format.md in sync with `packages/core/src/format.ts`.
 
 ## Conventions
 
@@ -34,4 +42,10 @@ For anything visual, render and look at the result:
 
 ```bash
 pnpm render --file bolt/bolt.l2d.json --anim cheer --frames 8 --debug
+```
+
+For rig changes, the build prints the bend test; also look at the bend sheet:
+
+```bash
+pnpm render --file kit/kit.l2d.json --bend
 ```
