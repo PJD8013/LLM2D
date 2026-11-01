@@ -13,9 +13,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { chromium } from 'playwright';
 import { SkeletonData, bendTest } from '../packages/core/src/index.ts';
-import { buildRig, composite, encodePng, readPsd, type LayeredArt, type RigSpec } from '../packages/rig/src/index.ts';
+import { closeBrowser, inspectImage } from '../packages/preview/src/index.ts';
+import { buildRig, readPsd, type LayeredArt, type RigSpec } from '../packages/rig/src/index.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -44,7 +44,8 @@ if (command === 'inspect') {
   for (const l of art.layers)
     console.log(`  ${l.name.padEnd(16)} x=${String(l.x).padEnd(5)} y=${String(l.y).padEnd(5)} ${l.image.width}x${l.image.height}${l.hidden ? '  hidden' : ''}`);
   const file = join(out, `${name}-inspect.png`);
-  await writeFile(file, await inspectImage(art, spec));
+  await writeFile(file, await inspectImage(art, { spec }));
+  await closeBrowser();
   console.log(`wrote ${file}`);
 } else {
   if (!spec) throw new Error('--spec is required for build');
@@ -74,57 +75,4 @@ if (command === 'inspect') {
   console.log(report.summary);
   for (const i of report.issues) console.log(`  ${i.severity.padEnd(7)} ${i.message}`);
   if (!report.ok && !values['allow-errors']) process.exitCode = 1;
-}
-
-/** Flattened art + pixel grid + layer boxes (+ spec bones), rendered to PNG with Chromium. */
-async function inspectImage(art: LayeredArt, spec?: RigSpec): Promise<Buffer> {
-  const { width: w, height: h } = art;
-  const png = encodePng(composite(art.layers, w, h)).toString('base64');
-  const lines: string[] = [];
-  for (let x = 0; x <= w; x += 50)
-    lines.push(`<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="${x % 100 ? '#0002' : '#0005'}" stroke-width="1"/>`);
-  for (let y = 0; y <= h; y += 50)
-    lines.push(`<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${y % 100 ? '#0002' : '#0005'}" stroke-width="1"/>`);
-  for (let x = 100; x < w; x += 100) lines.push(label(x + 3, 14, String(x), '#333'));
-  for (let y = 100; y < h; y += 100) lines.push(label(3, y - 3, String(y), '#333'));
-  const palette = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#008080', '#9a6324', '#800000'];
-  art.layers.forEach((l, i) => {
-    if (l.hidden) return;
-    const c = palette[i % palette.length];
-    lines.push(`<rect x="${l.x}" y="${l.y}" width="${l.image.width}" height="${l.image.height}" fill="none" stroke="${c}" stroke-dasharray="6 4" stroke-width="2"/>`);
-    lines.push(label(l.x + 4, l.y + 16, l.name, c));
-  });
-  if (spec) {
-    const pts = new Map<string, [number, number]>([['root', spec.origin]]);
-    for (const b of spec.bones) {
-      pts.set(b.name, b.from);
-      const t = b.to ?? b.from;
-      lines.push(`<line x1="${b.from[0]}" y1="${b.from[1]}" x2="${t[0]}" y2="${t[1]}" stroke="#ff2d78" stroke-width="5" stroke-linecap="round"/>`);
-      lines.push(`<circle cx="${b.from[0]}" cy="${b.from[1]}" r="7" fill="#ffd400" stroke="#000" stroke-width="1.5"/>`);
-      lines.push(label(b.from[0] + 9, b.from[1] - 6, b.name, '#b0004a'));
-    }
-    for (const c of spec.chains ?? []) {
-      lines.push(`<circle cx="${c.start[0]}" cy="${c.start[1]}" r="9" fill="none" stroke="#00b3ff" stroke-width="3"/>`);
-      lines.push(label(c.start[0] + 11, c.start[1] + 4, `${c.prefix} chain`, '#006a99'));
-      if (c.end) lines.push(`<circle cx="${c.end[0]}" cy="${c.end[1]}" r="6" fill="#00b3ff"/>`);
-    }
-    lines.push(`<path d="M ${spec.origin[0] - 14} ${spec.origin[1]} H ${spec.origin[0] + 14} M ${spec.origin[0]} ${spec.origin[1] - 14} V ${spec.origin[1] + 14}" stroke="#000" stroke-width="3"/>`);
-  }
-  const html = `<html><body style="margin:0;background:#fff">
-    <div style="position:relative;width:${w}px;height:${h}px">
-      <img src="data:image/png;base64,${png}" style="position:absolute;left:0;top:0"/>
-      <svg width="${w}" height="${h}" style="position:absolute;left:0;top:0;font:600 15px system-ui,sans-serif">${lines.join('')}</svg>
-    </div></body></html>`;
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage({ viewport: { width: w, height: h } });
-    await page.setContent(html);
-    return await page.screenshot({ clip: { x: 0, y: 0, width: w, height: h } });
-  } finally {
-    await browser.close();
-  }
-}
-
-function label(x: number, y: number, text: string, color: string): string {
-  return `<text x="${x}" y="${y}" fill="${color}" stroke="#fff" stroke-width="4" paint-order="stroke">${text}</text>`;
 }

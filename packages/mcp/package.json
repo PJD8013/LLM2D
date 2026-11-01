@@ -1,0 +1,17 @@
+{
+  "name": "@llm2d/mcp",
+  "version": "0.1.0",
+  "description": "MCP server that lets Claude rig, animate and preview LLM2D skeletons.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "bin": { "llm2d-mcp": "./src/server.ts" },
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@llm2d/core": "workspace:*",
+    "@llm2d/motion": "workspace:*",
+    "@llm2d/preview": "workspace:*",
+    "@llm2d/rig": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.5"
+  }
+}

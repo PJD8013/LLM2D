@@ -202,6 +202,8 @@ body[data-headless] #panel {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 #stage[data-bg='dark'] {
@@ -227,6 +229,9 @@ body[data-headless] #panel {
 
 #stage canvas {
   display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
 }
 
 #stage.dragging::after {

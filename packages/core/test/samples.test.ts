@@ -26,7 +26,9 @@ describe.each(['bolt', 'gem', 'kit'])('sample %s', (name) => {
         sk.updateWorldTransform();
         for (let s = 0; s < data.slots.length; s++) {
           const n = sk.computeSlotVertices(s, out);
-          for (let i = 0; i < n * 2; i++) expect(Number.isFinite(out[i])).toBe(true);
+          let finite = true;
+          for (let i = 0; i < n * 2; i++) finite &&= Number.isFinite(out[i]);
+          if (!finite) expect.fail(`non-finite vertex in ${anim.name}, slot ${data.slots[s].name}`);
         }
       }
     }

@@ -15,13 +15,16 @@
     "samples": "node scripts/build-samples.ts",
     "validate": "node scripts/validate.ts",
     "render": "node scripts/render.ts",
-    "rig": "node scripts/rig.ts"
+    "rig": "node scripts/rig.ts",
+    "mcp": "node packages/mcp/src/server.ts",
+    "mcp:call": "node scripts/mcp-call.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "playwright": "1.63.0",
     "typescript": "5.9.3",
     "vite": "6.4.5",
-    "vitest": "3.2.7"
+    "vitest": "3.2.7",
+    "@modelcontextprotocol/sdk": "1.32.1"
   }
 }
