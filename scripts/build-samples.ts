@@ -2,8 +2,10 @@
  * Regenerates the sample skeletons.
  * - Code-built samples (bolt, gem): writes each part's SVG source, rasterises it to PNG at 2x
  *   with headless Chromium, writes the .l2d.json and validates it.
- * - Auto-rigged samples (kit, coin): runs the rig pipeline on source/<name>.psd with rig.json and
- *   animations.ts or animations.json (`pnpm rig build`). The PSDs come from make-psd.ts / art.ts.
+ * - Auto-rigged samples (kit, coin, kit-flat): runs the rig pipeline on source/<name>.psd with
+ *   rig.json and animations.ts or animations.json (`pnpm rig build`). The PSDs come from
+ *   make-psd.ts / art.ts, or, for a sample with a split.json (kit-flat), from splitting its flat
+ *   picture source/<name>.jpg|png first (`pnpm split build`).
  *
  *   pnpm samples            # all samples
  *   pnpm samples bolt       # one sample
@@ -20,7 +22,7 @@ import type { ArtPart } from '../samples/_lib.ts';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCALE = 2;
 const BUILT = ['bolt', 'gem'];
-const RIGGED = ['kit', 'coin'];
+const RIGGED = ['kit', 'coin', 'kit-flat'];
 
 const wanted = process.argv.slice(2);
 const names = wanted.length ? wanted : [...BUILT, ...RIGGED];
@@ -31,6 +33,14 @@ const page = await browser.newPage({ deviceScaleFactor: SCALE });
 for (const name of names) {
   if (RIGGED.includes(name)) {
     const dir = `samples/${name}`;
+    if (existsSync(join(root, dir, 'split.json'))) {
+      const picture = ['jpg', 'jpeg', 'png', 'webp'].map((ext) => `${dir}/source/${name}.${ext}`).find((p) => existsSync(join(root, p)));
+      if (!picture) throw new Error(`${dir}/split.json needs a picture at ${dir}/source/${name}.jpg or .png`);
+      execFileSync(process.execPath, ['scripts/split.ts', 'build', picture, '--spec', `${dir}/split.json`, '--psd', `${dir}/source/${name}.psd`, '--out', 'out/split'], {
+        cwd: root,
+        stdio: 'inherit',
+      });
+    }
     execFileSync(
       process.execPath,
       ['scripts/rig.ts', 'build', `${dir}/source/${name}.psd`, '--spec', `${dir}/rig.json`, '--animations', existsSync(join(root, dir, 'animations.ts')) ? `${dir}/animations.ts` : `${dir}/animations.json`, '--out', dir],

@@ -9,10 +9,36 @@ import {
   type L2DFile,
   type ValidationResult,
 } from '@llm2d/core';
-import { alphaBounds, buildRig, composite, readPsd, type LayeredArt, type RigResult, type RigSpec } from '@llm2d/rig';
+import {
+  alphaBounds,
+  buildRig,
+  composite,
+  readPicture,
+  readPsd,
+  splitArt,
+  writePsd,
+  type LayeredArt,
+  type RGBAImage,
+  type RigResult,
+  type RigSpec,
+  type SplitFile,
+  type SplitResult,
+} from '@llm2d/rig';
+
+/** File types create_project treats as a flat picture to split (anything else must be a PSD). */
+export const PICTURE = /\.(png|jpe?g|webp)$/i;
+
+/** Decodes a picture file (PNG, JPEG, WebP) to RGBA. JPEG and WebP go through the browser. */
+export type Decoder = (bytes: Uint8Array, fileName: string) => Promise<RGBAImage>;
+
+/** Segmenting a big picture takes seconds; keep the last few results by file, date and settings. */
+const pictures = new Map<string, ReturnType<typeof readPicture>>();
 
 /** Rig spec as stored in a project: the build spec plus where the art lives. */
 export type ProjectSpec = RigSpec & { art?: string };
+
+/** split.json in a project made from a flat picture: the split settings plus the picture's path. */
+export type ProjectSplit = SplitFile & { picture: string };
 
 /**
  * An LLM2D project folder:
@@ -35,6 +61,55 @@ export class Project {
   }
   get animationsPath() {
     return join(this.dir, 'animations.json');
+  }
+  get splitPath() {
+    return join(this.dir, 'split.json');
+  }
+
+  async readSplit(): Promise<ProjectSplit | null> {
+    if (!(await this.exists(this.splitPath))) return null;
+    return JSON.parse(await readFile(this.splitPath, 'utf8'));
+  }
+
+  async requireSplit(): Promise<ProjectSplit> {
+    const split = await this.readSplit();
+    if (!split) throw new Error(`No split.json in ${this.dir}: this project was not made from a flat picture.`);
+    return split;
+  }
+
+  async writeSplit(split: ProjectSplit): Promise<void> {
+    await writeFile(this.splitPath, JSON.stringify(split, null, 2) + '\n');
+  }
+
+  /** The flat picture with its background removed and its segmentation (cached). */
+  async readPicture(decode: Decoder, settings?: Pick<SplitFile, 'background' | 'detail'>) {
+    const split = await this.requireSplit();
+    const path = resolve(this.dir, split.picture);
+    const use = { background: settings?.background ?? split.background, detail: settings?.detail ?? split.detail };
+    const key = `${path}\u0000${(await stat(path)).mtimeMs}\u0000${JSON.stringify(use)}`;
+    let picture = pictures.get(key);
+    if (!picture) {
+      picture = readPicture(await decode(await readFile(path), path), use);
+      pictures.set(key, picture);
+      while (pictures.size > 3) pictures.delete(pictures.keys().next().value!);
+    }
+    return picture;
+  }
+
+  /**
+   * Splits the flat picture into layers with `parts` (back to front), writes the layered PSD that
+   * rig.json points at, and saves the split settings to split.json.
+   */
+  async split(decode: Decoder, spec: Omit<SplitFile, 'background' | 'detail'>): Promise<SplitResult & { psd: string }> {
+    const split = await this.requireSplit();
+    const picture = await this.readPicture(decode);
+    const result = splitArt(picture.image, picture.segmentation, spec);
+    const rig = await this.requireSpec();
+    const psd = resolve(this.dir, rig.art ?? join('source', `${rig.name}.psd`));
+    await mkdir(join(psd, '..'), { recursive: true });
+    await writeFile(psd, writePsd(result.art));
+    await this.writeSplit({ picture: split.picture, background: split.background, detail: split.detail, ...spec });
+    return { ...result, psd };
   }
 
   async exists(path: string): Promise<boolean> {
@@ -64,6 +139,8 @@ export class Project {
     const spec = await this.requireSpec();
     if (!spec.art) throw new Error('rig.json has no "art" path to the PSD.');
     const path = resolve(this.dir, spec.art);
+    if (!(await this.exists(path)) && (await this.readSplit()))
+      throw new Error('This project starts from a flat picture that has not been split into layers yet. Call split_art first.');
     const mtime = (await stat(path)).mtimeMs;
     if (this.artCache?.path === path && this.artCache.mtime === mtime) return this.artCache.art;
     const art = readPsd(await readFile(path));
@@ -130,16 +207,37 @@ export class Project {
     return { result, bend, path };
   }
 
-  /** Creates a project around a PSD: copies it into source/ and writes a starter rig.json. */
-  static async create(dir: string, artPath: string, options: { kind: 'character' | 'symbol'; name?: string; scale?: number; overwrite?: boolean }) {
+  /**
+   * Creates a project around a PSD, or around a flat picture (PNG/JPEG/WebP) that split_art will
+   * turn into a PSD: copies the art into source/ and writes a starter rig.json (and split.json).
+   */
+  static async create(
+    dir: string,
+    artPath: string,
+    options: { kind: 'character' | 'symbol'; name?: string; scale?: number; overwrite?: boolean; decode?: Decoder; background?: string; detail?: number },
+  ) {
     const project = new Project(dir);
     if ((await project.exists(project.specPath)) && !options.overwrite)
       throw new Error(`${project.specPath} already exists. Pass overwrite: true to start over, or use set_rig_spec to change it.`);
-    const art = readPsd(await readFile(resolve(artPath)));
     await mkdir(join(project.dir, 'source'), { recursive: true });
     const artName = basename(artPath);
     const target = join(project.dir, 'source', artName);
     if (resolve(artPath) !== target) await copyFile(resolve(artPath), target);
+    const name = (options.name ?? basename(dir)).replace(/[^A-Za-z0-9_-]+/g, '_');
+
+    let art: LayeredArt;
+    let artFile = target;
+    let picture: ReturnType<typeof readPicture> | null = null;
+    if (PICTURE.test(artName)) {
+      if (!options.decode) throw new Error('No picture decoder available.');
+      await project.writeSplit({ picture: relative(project.dir, target), background: options.background ?? 'auto', detail: options.detail, parts: [] });
+      picture = await project.readPicture(options.decode);
+      const img = picture.image;
+      art = { width: img.width, height: img.height, layers: [{ name: 'picture', x: 0, y: 0, image: img, hidden: false, opacity: 1, blend: 'normal' }], warnings: [] };
+      artFile = join(project.dir, 'source', `${name}.psd`);
+    } else {
+      art = readPsd(await readFile(target));
+    }
 
     // Origin: between the feet for characters (centre of the lowest opaque rows, so a tail or
     // a raised arm does not pull it sideways), centre of the art for symbols.
@@ -162,10 +260,9 @@ export class Project {
       origin = [Math.round(n ? sum / n : bounds.x + bounds.width / 2), bottom + 1];
     }
     const scale = options.scale ?? (Math.max(art.width, art.height) > 1200 ? 0.5 : 1);
-    const name = (options.name ?? basename(dir)).replace(/[^A-Za-z0-9_-]+/g, '_');
     const spec: ProjectSpec = {
       name,
-      art: relative(project.dir, target),
+      art: relative(project.dir, artFile),
       scale,
       origin,
       bones: [],
@@ -173,6 +270,6 @@ export class Project {
     };
     await project.writeSpec(spec);
     if (!(await project.exists(project.animationsPath))) await writeFile(project.animationsPath, '{}\n');
-    return { project, art, spec };
+    return { project, art, spec, picture };
   }
 }

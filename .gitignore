@@ -5,3 +5,5 @@ out/
 *.log
 .DS_Store
 .svelte-kit/
+# Generated from source/kit-flat.jpg + split.json by `pnpm samples kit-flat`.
+samples/kit-flat/source/kit-flat.psd

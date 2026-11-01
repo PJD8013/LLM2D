@@ -10,6 +10,8 @@ PSD ──► inspect(격자 이미지) ──► rig.json 작성 ──► buil
 
 예제: [`samples/kit`](../samples/kit) (여우 캐릭터. `source/kit.psd`, `rig.json`, `animations.ts`)
 
+레이어 없이 그림 한 장만 있으면 먼저 [자동 분리](split.md)로 PSD를 만드세요.
+
 ## 1. 그림 준비
 
 - **레이어 하나 = 움직이는 부위 하나.** 팔, 다리, 꼬리처럼 휘는 부위는 통째로 한 레이어여도
