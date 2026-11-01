@@ -19,7 +19,8 @@
     "mcp": "node packages/mcp/src/server.ts",
     "mcp:call": "node scripts/mcp-call.ts",
     "export": "node scripts/export.ts",
-    "pack:lib": "node scripts/pack-lib.ts"
+    "pack:lib": "node scripts/pack-lib.ts",
+    "stake:lines": "node scripts/stake-lines.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

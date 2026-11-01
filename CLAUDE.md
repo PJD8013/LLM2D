@@ -26,12 +26,16 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - `samples/coin` — symbol rigged and animated through the MCP tools: `art.ts` (PSD), `rig.json`, `animations.json`.
 - `apps/reel-demo` — Svelte 5 + pixi-svelte 2.1 demo of the Stake integration; `pnpm assets` exports samples
   with atlases into `public/assets` (gitignored).
+- `examples/stake-lines` — `lines.patch` against StakeEngine/web-sdk 1843d60 that swaps the `lines` game's H1 symbol
+  for the coin; `pnpm stake:lines apply <web-sdk>` vendors the tgz, exports the coin and applies it,
+  `pnpm stake:lines capture` screenshots the running Storybook (port 6001). Regenerate the patch with `git diff` in
+  web-sdk after changing it there (use `git add -N` for new files).
 - `samples/kit` — auto-rigged sample: `art.ts` + `make-psd.ts` produce `source/kit.psd`; `rig.json`
   (joints in PSD pixels) and `animations.ts` are the inputs to `pnpm rig build`.
 - `pnpm samples` regenerates every sample's PNGs and `<name>.l2d.json`. Edit the sources, never the
   generated JSON/PNGs by hand.
 - `scripts/` — `build-samples.ts`, `rig.ts` (inspect/build), `render.ts` (contact sheets and
-  `--bend` sheets), `validate.ts`, `mcp-call.ts` (call MCP tools over stdio; images go to out/mcp).
+  `--bend` sheets), `validate.ts`, `mcp-call.ts` (call MCP tools over stdio; images go to out/mcp), `stake-lines.ts`.
 - `docs/format.md` (format spec), `docs/rigging.md` (rigging guide), `docs/mcp.md` (Claude/MCP
   guide), `docs/stake.md` (Stake integration), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
 
