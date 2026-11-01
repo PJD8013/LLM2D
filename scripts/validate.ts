@@ -15,7 +15,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const files = args.filter((a) => a !== '--json');
-if (!files.length) files.push('samples/bolt/bolt.l2d.json', 'samples/gem/gem.l2d.json', 'samples/kit/kit.l2d.json');
+if (!files.length) files.push('samples/bolt/bolt.l2d.json', 'samples/gem/gem.l2d.json', 'samples/kit/kit.l2d.json', 'samples/coin/coin.l2d.json');
 
 const report: { file: string; ok: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] }[] = [];
 for (const file of files) {

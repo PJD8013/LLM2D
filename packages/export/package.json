@@ -1,0 +1,12 @@
+{
+  "name": "@llm2d/export",
+  "version": "0.1.0",
+  "description": "Game export for LLM2D skeletons: texture atlas packing and resolution variants.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@llm2d/core": "workspace:*",
+    "@llm2d/rig": "workspace:*"
+  }
+}

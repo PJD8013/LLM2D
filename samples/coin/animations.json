@@ -1,0 +1,261 @@
+{
+  "idle": {
+    "bones": {
+      "coin": {
+        "translate": [
+          {
+            "time": 0,
+            "y": 0,
+            "curve": "easeOutSine"
+          },
+          {
+            "time": 0.6,
+            "y": 3,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 1.8,
+            "y": -3,
+            "curve": "easeInSine"
+          },
+          {
+            "time": 2.4,
+            "y": 0
+          }
+        ],
+        "scale": [
+          {
+            "time": 0,
+            "x": 0.985,
+            "y": 0.985,
+            "curve": "easeOutSine"
+          },
+          {
+            "time": 1.2,
+            "x": 1.015,
+            "y": 1.015,
+            "curve": "easeInSine"
+          },
+          {
+            "time": 2.4,
+            "x": 0.985,
+            "y": 0.985
+          }
+        ]
+      }
+    }
+  },
+  "land": {
+    "bones": {
+      "coin": {
+        "translate": [
+          {
+            "time": 0,
+            "y": -44,
+            "curve": "easeInQuad"
+          },
+          {
+            "time": 0.12,
+            "y": 0
+          }
+        ],
+        "scale": [
+          {
+            "time": 0,
+            "x": 0.92,
+            "y": 1.1,
+            "curve": "easeInQuad"
+          },
+          {
+            "time": 0.12,
+            "x": 1.2,
+            "y": 0.8,
+            "curve": "easeOutElastic"
+          },
+          {
+            "time": 0.5,
+            "x": 1,
+            "y": 1
+          }
+        ]
+      }
+    },
+    "events": [
+      {
+        "time": 0.12,
+        "name": "land"
+      }
+    ],
+    "slots": {
+      "flash": {
+        "alpha": [
+          {
+            "time": 0.1,
+            "value": 0,
+            "curve": "easeOutQuad"
+          },
+          {
+            "time": 0.14,
+            "value": 0.35,
+            "curve": "easeOutQuad"
+          },
+          {
+            "time": 0.37,
+            "value": 0
+          }
+        ]
+      }
+    }
+  },
+  "win": {
+    "bones": {
+      "coin": {
+        "scale": [
+          {
+            "time": 0,
+            "x": 1,
+            "y": 1,
+            "curve": "easeOutBack"
+          },
+          {
+            "time": 0.252,
+            "x": 1.18,
+            "y": 1.18,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.6,
+            "x": 1.018,
+            "y": 1.018,
+            "curve": "easeOutBack"
+          },
+          {
+            "time": 0.852,
+            "x": 1.108,
+            "y": 1.108,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 1.2,
+            "x": 1,
+            "y": 1
+          }
+        ],
+        "rotate": [
+          {
+            "time": 0,
+            "value": 0,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.204,
+            "value": -5,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.456,
+            "value": 4.25,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.696,
+            "value": -2,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.948,
+            "value": 1.5,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 1.2,
+            "value": 0
+          }
+        ]
+      },
+      "glow": {
+        "scale": [
+          {
+            "time": 0,
+            "x": 0.7,
+            "y": 0.7,
+            "curve": "easeOutQuad"
+          },
+          {
+            "time": 0.3,
+            "x": 1.1,
+            "y": 1.1,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.744,
+            "x": 0.9,
+            "y": 0.9,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 1.2,
+            "x": 0.7,
+            "y": 0.7
+          }
+        ]
+      },
+      "star": {
+        "rotate": [
+          {
+            "time": 0.2,
+            "value": 0,
+            "curve": "easeInOutCubic"
+          },
+          {
+            "time": 1,
+            "value": 360
+          }
+        ]
+      }
+    },
+    "slots": {
+      "glow": {
+        "alpha": [
+          {
+            "time": 0,
+            "value": 0,
+            "curve": "easeOutQuad"
+          },
+          {
+            "time": 0.3,
+            "value": 0.95,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 0.744,
+            "value": 0.45,
+            "curve": "easeInOutSine"
+          },
+          {
+            "time": 1.2,
+            "value": 0
+          }
+        ]
+      },
+      "flash": {
+        "alpha": [
+          {
+            "time": 0,
+            "value": 0,
+            "curve": "easeOutQuad"
+          },
+          {
+            "time": 0.204,
+            "value": 0.28,
+            "curve": "easeInQuad"
+          },
+          {
+            "time": 0.504,
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import { Application, Container, Texture } from 'pixi.js';
-import { bendPoses, validate, type TrackEntry } from '@llm2d/core';
-import { Llm2dActor, fromLoaded, loadLlm2d, type LoadedLlm2d } from '@llm2d/pixi';
+import { bendPoses, validate, type L2DImage, type TrackEntry } from '@llm2d/core';
+import { Llm2dActor, cutTextures, fromLoaded, loadLlm2d, type LoadedLlm2d } from '@llm2d/pixi';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const ui = {
@@ -159,13 +159,13 @@ async function loadFiles(list: FileList | File[]) {
   try {
     const json = JSON.parse(await jsonFile.text());
     const byName = new Map(files.map((f) => [f.name, f]));
-    const textures: Record<string, Texture> = {};
-    for (const [name, img] of Object.entries((json.images ?? {}) as Record<string, { path: string }>)) {
-      const base = img.path.split('/').pop()!;
-      const f = byName.get(base);
-      if (f) textures[name] = Texture.from(await createImageBitmap(f));
+    const pages: Record<string, string> = {};
+    for (const img of Object.values((json.images ?? {}) as Record<string, { path: string }>)) {
+      const f = byName.get(img.path.split('/').pop()!);
+      if (f && !pages[img.path]) pages[img.path] = URL.createObjectURL(f);
     }
-    setActor(fromLoaded(json, textures), jsonFile.name);
+    await loadData(json, pages, jsonFile.name);
+    for (const url of Object.values(pages)) URL.revokeObjectURL(url);
   } catch (e) {
     showError(String((e as Error).message ?? e));
   }
@@ -375,17 +375,24 @@ function backgroundColor(): string {
 }
 
 /** Loads a skeleton from JSON plus images given as data/object URLs (used by headless tools). */
-async function loadData(json: unknown, images: Record<string, string>, label = 'data') {
-  const textures: Record<string, Texture> = {};
+/**
+ * Loads a skeleton from JSON plus its PNGs, given as data/object URLs keyed by the image path
+ * in the file (atlas pages are shared by several images). Used by drag & drop and headless tools.
+ */
+async function loadData(json: unknown, pages: Record<string, string>, label = 'data') {
   const fresh: Texture[] = [];
   try {
-    for (const [name, url] of Object.entries(images)) {
+    const pageTextures: Record<string, Texture> = {};
+    for (const [path, url] of Object.entries(pages)) {
       const blob = await (await fetch(url)).blob();
       const t = Texture.from(await createImageBitmap(blob));
-      textures[name] = t;
+      pageTextures[path] = t;
       fresh.push(t);
     }
-    setActor(fromLoaded(json, textures), label);
+    const images = ((json as { images?: Record<string, L2DImage> }).images ?? {}) as Record<string, L2DImage>;
+    // Older callers keyed the PNGs by image name instead of path.
+    for (const [name, img] of Object.entries(images)) pageTextures[img.path] ??= pageTextures[name];
+    setActor(fromLoaded(json, cutTextures(images, pageTextures)), label);
   } catch (e) {
     for (const t of fresh) t.destroy(true);
     throw e;

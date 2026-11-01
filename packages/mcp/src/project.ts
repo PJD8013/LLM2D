@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import {
   SkeletonData,
   bendTest,
@@ -174,23 +174,5 @@ export class Project {
     await project.writeSpec(spec);
     if (!(await project.exists(project.animationsPath))) await writeFile(project.animationsPath, '{}\n');
     return { project, art, spec };
-  }
-
-  /** Copies the skeleton and its images into `dest/<name>/`. */
-  async export(dest: string): Promise<string[]> {
-    const path = await this.requireSkeletonPath();
-    const file = JSON.parse(await readFile(path, 'utf8')) as L2DFile;
-    const out = resolve(dest, file.name);
-    const written: string[] = [];
-    await mkdir(join(out, 'images'), { recursive: true });
-    await writeFile(join(out, `${file.name}.l2d.json`), JSON.stringify(file) + '\n');
-    written.push(join(out, `${file.name}.l2d.json`));
-    for (const img of Object.values(file.images)) {
-      const target = join(out, img.path);
-      await mkdir(dirname(target), { recursive: true });
-      await copyFile(join(dirname(path), img.path), target);
-      written.push(target);
-    }
-    return written;
   }
 }

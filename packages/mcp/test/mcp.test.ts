@@ -102,7 +102,8 @@ describe('llm2d MCP server', () => {
     const exported = await call('export_project', { dir, dest: out });
     expect(exported.isError).toBeFalsy();
     expect(existsSync(join(out, 'fox', 'fox.l2d.json'))).toBe(true);
-    expect(existsSync(join(out, 'fox', 'images', 'tail.png'))).toBe(true);
+    expect(existsSync(join(out, 'fox', 'fox.png'))).toBe(true);
+    expect(exported.text).toMatch(/Atlas pages: fox.png \d+x\d+/);
   });
 
   it('returns precise errors for bad animations and presets', async () => {

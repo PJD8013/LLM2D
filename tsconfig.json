@@ -1,7 +1,19 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/*/src", "scripts", "samples/**/*.ts"]
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "apps/*/src",
+    "scripts",
+    "samples/**/*.ts"
+  ],
+  "exclude": [
+    "packages/svelte",
+    "apps/reel-demo"
+  ]
 }

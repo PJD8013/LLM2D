@@ -55,6 +55,11 @@ export function validate(input: unknown): ValidationResult {
       }
       if (!isStr(img.path)) err(`${p}.path`, 'Must be a relative file path');
       if (!isNum(img.width) || img.width <= 0) err(`${p}.width`, 'Must be a positive number');
+      if (img.frame !== undefined) {
+        const fr = img.frame as Obj;
+        if (!isObj(fr) || ![fr.x, fr.y, fr.width, fr.height].every(isNum) || (fr.x as number) < 0 || (fr.y as number) < 0 || (fr.width as number) <= 0 || (fr.height as number) <= 0)
+          err(`${p}.frame`, 'Must be { x, y, width, height } in PNG pixels with a positive size');
+      }
       if (!isNum(img.height) || img.height <= 0) err(`${p}.height`, 'Must be a positive number');
     }
 

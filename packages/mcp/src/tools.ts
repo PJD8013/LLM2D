@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { CURVE_NAMES, Skeleton, SkeletonData, bendTest, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
 import { applyPreset, describePresets, findPreset, mergeAnimations } from '@llm2d/motion';
+import { exportSkeleton } from '@llm2d/export';
 import { Previewer, inspectImage } from '@llm2d/preview';
 import { Project, type ProjectSpec } from './project.ts';
 
@@ -529,12 +530,26 @@ export function createServer() {
     'export_project',
     {
       title: 'Export to game',
-      description: "Copies the skeleton and its images to <dest>/<name>/ (for example a Stake game's static assets folder).",
-      input: { dir: dirArg, dest: z.string().describe('Destination folder.') },
+      description:
+        "Writes a game-ready copy to <dest>/<name>/: minified <name>.l2d.json plus its images packed into texture atlas pages (fewer files and draw calls). scale 0.5 makes a half-resolution set for mobile. Point dest at the game's static assets folder.",
+      input: {
+        dir: dirArg,
+        dest: z.string().describe('Destination folder.'),
+        atlas: z.boolean().default(true).describe('Pack images into atlas pages.'),
+        scale: z.number().min(0.1).max(1).default(1).describe('Texture resolution factor (needs atlas).'),
+        max_size: z.number().int().min(256).max(8192).default(2048).describe('Largest atlas page side in pixels.'),
+      },
     },
     async (a) => {
-      const files = await new Project(a.dir).export(a.dest);
-      return [text(`Exported ${files.length} files:\n${files.map((f) => `  ${f}`).join('\n')}`)];
+      const project = new Project(a.dir);
+      const r = await exportSkeleton(await project.requireSkeletonPath(), a.dest, { atlas: a.atlas, scale: a.scale, maxSize: a.max_size });
+      const total = r.files.reduce((n, f) => n + f.bytes, 0);
+      return [
+        text(
+          `Exported to ${r.dir} (${(total / 1024).toFixed(0)} KB):\n${r.files.map((f) => `  ${f.path} (${(f.bytes / 1024).toFixed(0)} KB)`).join('\n')}` +
+            (r.pages.length ? `\nAtlas pages: ${r.pages.map((p) => `${p.name} ${p.width}x${p.height} (${Math.round(p.fill * 100)}% filled)`).join(', ')}` : ''),
+        ),
+      ];
     },
   );
 
