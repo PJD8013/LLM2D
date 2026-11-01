@@ -1,0 +1,20 @@
+{
+  "name": "@llm2d/pixi",
+  "version": "0.1.0",
+  "description": "PixiJS 8 runtime for LLM2D skeletons.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@llm2d/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "pixi.js": "^8.8.0"
+  },
+  "devDependencies": {
+    "pixi.js": "8.8.1"
+  }
+}

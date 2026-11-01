@@ -1,0 +1,26 @@
+{
+  "name": "llm2d-workspace",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @llm2d/viewer dev",
+    "build:viewer": "pnpm --filter @llm2d/viewer build",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "samples": "node scripts/build-samples.ts",
+    "validate": "node scripts/validate.ts",
+    "render": "node scripts/render.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "playwright": "1.63.0",
+    "typescript": "5.9.3",
+    "vite": "6.4.5",
+    "vitest": "3.2.7"
+  }
+}

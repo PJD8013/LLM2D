@@ -1,0 +1,442 @@
+{
+  "format": "llm2d",
+  "version": "0.1",
+  "name": "gem",
+  "meta": {
+    "description": "Sample high-pay slot symbol for LLM2D. Original art generated from samples/gem/build.ts."
+  },
+  "bounds": {
+    "x": -100,
+    "y": -100,
+    "width": 200,
+    "height": 200
+  },
+  "images": {
+    "glow": {
+      "path": "images/glow.png",
+      "width": 300,
+      "height": 300
+    },
+    "gem": {
+      "path": "images/gem.png",
+      "width": 180,
+      "height": 180
+    },
+    "gem_flash": {
+      "path": "images/gem_flash.png",
+      "width": 180,
+      "height": 180
+    },
+    "sparkle": {
+      "path": "images/sparkle.png",
+      "width": 64,
+      "height": 64
+    }
+  },
+  "bones": [
+    {
+      "name": "root"
+    },
+    {
+      "name": "gem",
+      "parent": "root"
+    },
+    {
+      "name": "glow",
+      "parent": "gem"
+    },
+    {
+      "name": "sparkle",
+      "parent": "gem",
+      "x": 40,
+      "y": -58
+    }
+  ],
+  "slots": [
+    {
+      "name": "glow",
+      "bone": "glow",
+      "attachment": "glow",
+      "color": "ffffff00",
+      "blend": "add"
+    },
+    {
+      "name": "gem",
+      "bone": "gem",
+      "attachment": "gem"
+    },
+    {
+      "name": "gem_flash",
+      "bone": "gem",
+      "attachment": "gem_flash",
+      "color": "ffffff00",
+      "blend": "add"
+    },
+    {
+      "name": "sparkle",
+      "bone": "sparkle",
+      "attachment": "sparkle",
+      "color": "ffffff00",
+      "blend": "add"
+    }
+  ],
+  "attachments": {
+    "glow": {
+      "glow": {
+        "type": "region",
+        "image": "glow",
+        "x": 0,
+        "y": 0
+      }
+    },
+    "gem": {
+      "gem": {
+        "type": "region",
+        "image": "gem",
+        "x": 0,
+        "y": 2
+      }
+    },
+    "gem_flash": {
+      "gem_flash": {
+        "type": "region",
+        "image": "gem_flash",
+        "x": 0,
+        "y": 2
+      }
+    },
+    "sparkle": {
+      "sparkle": {
+        "type": "region",
+        "image": "sparkle",
+        "x": 40,
+        "y": -58
+      }
+    }
+  },
+  "animations": {
+    "idle": {
+      "duration": 2.4,
+      "bones": {
+        "gem": {
+          "translate": [
+            {
+              "time": 0,
+              "y": 0,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 1.2,
+              "y": -3,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 2.4,
+              "y": 0
+            }
+          ]
+        },
+        "sparkle": {
+          "rotate": [
+            {
+              "time": 1.5,
+              "value": 0
+            },
+            {
+              "time": 2.1,
+              "value": 90
+            }
+          ],
+          "scale": [
+            {
+              "time": 1.5,
+              "x": 0.2,
+              "y": 0.2,
+              "curve": "easeOutBack"
+            },
+            {
+              "time": 1.75,
+              "x": 1,
+              "y": 1,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 2.1,
+              "x": 0.2,
+              "y": 0.2
+            }
+          ]
+        }
+      },
+      "slots": {
+        "sparkle": {
+          "alpha": [
+            {
+              "time": 1.5,
+              "value": 0,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 1.7,
+              "value": 1,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 2.1,
+              "value": 0
+            }
+          ]
+        }
+      }
+    },
+    "land": {
+      "bones": {
+        "gem": {
+          "translate": [
+            {
+              "time": 0,
+              "y": -36,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 0.12,
+              "y": 0
+            }
+          ],
+          "scale": [
+            {
+              "time": 0,
+              "x": 0.92,
+              "y": 1.1,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 0.12,
+              "x": 1.2,
+              "y": 0.8,
+              "curve": "easeOutElastic"
+            },
+            {
+              "time": 0.5,
+              "x": 1,
+              "y": 1
+            }
+          ]
+        }
+      },
+      "slots": {
+        "gem_flash": {
+          "alpha": [
+            {
+              "time": 0.1,
+              "value": 0,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 0.13,
+              "value": 0.35,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 0.35,
+              "value": 0
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "time": 0.12,
+          "name": "land"
+        }
+      ]
+    },
+    "win": {
+      "bones": {
+        "gem": {
+          "scale": [
+            {
+              "time": 0,
+              "x": 1,
+              "y": 1,
+              "curve": "easeOutBack"
+            },
+            {
+              "time": 0.25,
+              "x": 1.2,
+              "y": 1.2,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.6,
+              "x": 1.02,
+              "y": 1.02,
+              "curve": "easeOutBack"
+            },
+            {
+              "time": 0.85,
+              "x": 1.12,
+              "y": 1.12,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 1.2,
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rotate": [
+            {
+              "time": 0,
+              "value": 0,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.2,
+              "value": -7,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.45,
+              "value": 6,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.7,
+              "value": -3,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.95,
+              "value": 2,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 1.2,
+              "value": 0
+            }
+          ]
+        },
+        "glow": {
+          "scale": [
+            {
+              "time": 0,
+              "x": 0.7,
+              "y": 0.7,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 0.3,
+              "x": 1.1,
+              "y": 1.1,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.75,
+              "x": 0.9,
+              "y": 0.9,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 1.2,
+              "x": 0.7,
+              "y": 0.7
+            }
+          ]
+        },
+        "sparkle": {
+          "rotate": [
+            {
+              "time": 0.15,
+              "value": 0
+            },
+            {
+              "time": 0.75,
+              "value": 180
+            }
+          ],
+          "scale": [
+            {
+              "time": 0.15,
+              "x": 0,
+              "y": 0,
+              "curve": "easeOutBack"
+            },
+            {
+              "time": 0.4,
+              "x": 0.9,
+              "y": 0.9,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 0.75,
+              "x": 0,
+              "y": 0
+            }
+          ]
+        }
+      },
+      "slots": {
+        "glow": {
+          "alpha": [
+            {
+              "time": 0,
+              "value": 0,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 0.3,
+              "value": 0.95,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 0.75,
+              "value": 0.45,
+              "curve": "easeInOutSine"
+            },
+            {
+              "time": 1.2,
+              "value": 0
+            }
+          ]
+        },
+        "gem_flash": {
+          "alpha": [
+            {
+              "time": 0,
+              "value": 0,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 0.2,
+              "value": 0.28,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 0.5,
+              "value": 0
+            }
+          ]
+        },
+        "sparkle": {
+          "alpha": [
+            {
+              "time": 0.15,
+              "value": 0,
+              "curve": "easeOutQuad"
+            },
+            {
+              "time": 0.35,
+              "value": 1,
+              "curve": "easeInQuad"
+            },
+            {
+              "time": 0.75,
+              "value": 0
+            }
+          ]
+        }
+      }
+    }
+  }
+}
