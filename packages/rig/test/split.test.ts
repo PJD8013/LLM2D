@@ -161,6 +161,33 @@ describe('flat picture split', () => {
     expect(glow.image.data[centre]).toBeGreaterThan(200); // orange, not darkened
   });
 
+  it('continues a gradient smoothly behind a front part', () => {
+    // A horizontal gradient card (red rising with x) with a blue bar standing in front of it.
+    const img = createImage(200, 120);
+    for (let y = 0; y < 120; y++)
+      for (let x = 0; x < 200; x++) {
+        const bar = x >= 90 && x < 110 && y >= 10 && y < 110;
+        const card = x >= 20 && x < 180 && y >= 20 && y < 100;
+        const c = bar ? [30, 60, 200, 255] : card ? [40 + x, 100, 150, 255] : [0, 0, 0, 0];
+        img.data.set(c, (y * 200 + x) * 4);
+      }
+    const result = splitArt(img, segmentArt(img), {
+      parts: [
+        { name: 'card', regions: [[40, 60], [150, 60]] },
+        { name: 'bar', regions: [[100, 60]] },
+      ],
+    });
+    expect(result.report.difference).toBe(0);
+    const card = result.art.layers[0];
+    const red = (x: number) => card.image.data[((60 - card.y) * card.image.width + x - card.x) * 4];
+    const row = Array.from({ length: 20 }, (_, i) => red(90 + i));
+    expect(Math.abs(red(100) - 140)).toBeLessThan(8);
+    for (let i = 1; i < row.length; i++) {
+      expect(row[i]).toBeGreaterThanOrEqual(row[i - 1] - 1); // rising, no step back
+      expect(row[i] - row[i - 1]).toBeLessThan(6); // no jump where two nearest colours meet
+    }
+  });
+
   it('composites additive layers as light: over nothing a glow keeps its colour', () => {
     const px = (r: number, g: number, b: number, a: number) => {
       const img = createImage(1, 1);

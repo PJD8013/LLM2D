@@ -503,6 +503,15 @@ function paintFill(
     for (let k = 0; k < n; k++) if (f[k] && src[k] < 0) src[k] = across[k];
   }
 
+  // Colours. Each rebuilt pixel takes the colour area of its nearest source. Areas that look
+  // alike where they meet inside the rebuilt region (one surface cut in two by the part in front,
+  // like a gradient on both sides of an arm) are filled together; different areas keep a sharp
+  // edge between them (flat cartoon colours). Within a surface, the colours of its sources along
+  // the rebuilt region's edge are interpolated smoothly, so gradients continue instead of turning
+  // into flat facets, without drifting towards colours far away.
+  const fillColor = new Float32Array(n * 4);
+  smoothFill(f, src, seeds, data, seg, win, fillColor);
+
   const whole = new Uint8Array(n);
   for (let k = 0; k < n; k++) whole[k] = m[k] || f[k] ? 1 : 0;
   const edge = outline ? distanceTransform(whole, win.w, win.h) : null;
@@ -511,9 +520,9 @@ function paintFill(
     if (!f[k]) continue;
     const s = src[k];
     if (s < 0) continue;
-    let r = data[s * 4];
-    let g = data[s * 4 + 1];
-    let b = data[s * 4 + 2];
+    let r = fillColor[k * 4];
+    let g = fillColor[k * 4 + 1];
+    let b = fillColor[k * 4 + 2];
     if (outline && edge) {
       const cover = Math.max(0, Math.min(1, outline.width + 0.5 - edge[k]));
       r += (outline.color[0] - r) * cover;
@@ -523,9 +532,221 @@ function paintFill(
     d[k * 4] = Math.round(r);
     d[k * 4 + 1] = Math.round(g);
     d[k * 4 + 2] = Math.round(b);
-    // Solid parts are filled opaque; a glow keeps the faintness of its nearest pixel.
-    d[k * 4 + 3] = opaqueFill ? 255 : data[s * 4 + 3];
+    // Solid parts are filled opaque; a glow continues its own faintness.
+    d[k * 4 + 3] = opaqueFill ? 255 : Math.round(fillColor[k * 4 + 3]);
   }
+}
+
+/** Width (px) of the band of sources along a rebuilt region's edge that its colours come from. */
+const FILL_BAND = 10;
+/** Areas whose sources by a rebuilt region differ less than this (RGB distance) are one surface. */
+const SAME_SURFACE = 40;
+
+/** Colours (RGBA, window pixels) for the rebuilt pixels `f`; see paintFill. */
+function smoothFill(f: Uint8Array, src: Int32Array, seeds: Int32Array, data: Uint8Array, seg: Segmentation, win: Win, out: Float32Array) {
+  const n = win.w * win.h;
+  const areaOf = (k: number) => seg.labels[src[k]];
+  // Sources near the rebuilt region and their mean colour per area.
+  const notF = new Uint8Array(n);
+  for (let k = 0; k < n; k++) notF[k] = f[k] ? 0 : 1;
+  const toHole = distanceTransform(notF, win.w, win.h);
+  const band = new Uint8Array(n);
+  const mean = new Map<number, [number, number, number, number]>();
+  for (let k = 0; k < n; k++) {
+    const g = seeds[k];
+    if (g < 0 || toHole[k] > FILL_BAND) continue;
+    band[k] = 1;
+    const area = seg.labels[g];
+    const m = mean.get(area) ?? mean.set(area, [0, 0, 0, 0]).get(area)!;
+    for (let c = 0; c < 3; c++) m[c] += data[g * 4 + c];
+    m[3]++;
+  }
+  // Surfaces: areas meeting inside the rebuilt region with similar colours there.
+  const parent = new Map<number, number>();
+  const find = (a: number): number => {
+    let r = a;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(a, r);
+    return r;
+  };
+  const similar = (a: number, b: number) => {
+    const ma = mean.get(a);
+    const mb = mean.get(b);
+    if (!ma || !mb) return false;
+    let d = 0;
+    for (let c = 0; c < 3; c++) d += (ma[c] / ma[3] - mb[c] / mb[3]) ** 2;
+    return Math.sqrt(d) < SAME_SURFACE;
+  };
+  for (let k = 0; k < n; k++) {
+    if (!f[k] || src[k] < 0) continue;
+    const a = areaOf(k);
+    find(a);
+    const x = k % win.w;
+    for (const j of [x + 1 < win.w ? k + 1 : -1, k + win.w < n ? k + win.w : -1]) {
+      if (j < 0 || !f[j] || src[j] < 0) continue;
+      const b = areaOf(j);
+      if (b !== a && find(a) !== find(b) && similar(a, b)) parent.set(find(a), find(b));
+    }
+  }
+  const surfaces = new Map<number, number[]>();
+  for (let k = 0; k < n; k++) {
+    if (!f[k] || src[k] < 0) continue;
+    const root = find(areaOf(k));
+    (surfaces.get(root) ?? surfaces.set(root, []).get(root)!).push(k);
+  }
+  for (const [root, cell] of surfaces) {
+    let x0 = win.w;
+    let y0 = win.h;
+    let x1 = -1;
+    let y1 = -1;
+    for (const k of cell) {
+      const x = k % win.w;
+      const y = (k - x) / win.w;
+      x0 = Math.min(x0, x);
+      x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y);
+      y1 = Math.max(y1, y);
+    }
+    const pad = FILL_BAND + 2;
+    x0 = Math.max(0, x0 - pad);
+    y0 = Math.max(0, y0 - pad);
+    x1 = Math.min(win.w - 1, x1 + pad);
+    y1 = Math.min(win.h - 1, y1 + pad);
+    const bw = x1 - x0 + 1;
+    const bh = y1 - y0 + 1;
+    const vals = new Float32Array(bw * bh * 4);
+    const known = new Uint8Array(bw * bh);
+    let any = false;
+    for (let y = 0; y < bh; y++)
+      for (let x = 0; x < bw; x++) {
+        const k = (y + y0) * win.w + x + x0;
+        if (!band[k] || find(seg.labels[seeds[k]]) !== root) continue;
+        known[y * bw + x] = 1;
+        for (let c = 0; c < 4; c++) vals[(y * bw + x) * 4 + c] = data[seeds[k] * 4 + c];
+        any = true;
+      }
+    if (!any) {
+      // No source of this surface near the region: the nearest source's colour.
+      for (const k of cell) for (let c = 0; c < 4; c++) out[k * 4 + c] = data[src[k] * 4 + c];
+      continue;
+    }
+    const filled = pushPull(vals, known, bw, bh, 4);
+    for (const k of cell) {
+      const x = (k % win.w) - x0;
+      const y = Math.floor(k / win.w) - y0;
+      for (let c = 0; c < 4; c++) out[k * 4 + c] = filled[(y * bw + x) * 4 + c];
+    }
+  }
+}
+
+/**
+ * Smooth scattered-data fill: values known at some pixels are averaged down an image pyramid
+ * (push), then brought back up with bilinear upsampling where nothing was known (pull), relaxing
+ * the unknown pixels at every level towards the average of their neighbours (a few Gauss-Seidel
+ * sweeps of Laplace's equation, coarse to fine), so the fill is close to a membrane stretched over
+ * the known values: gradients continue linearly across holes.
+ */
+export function pushPull(vals: Float32Array, known: Uint8Array, w: number, h: number, ch: number, sweeps = 8): Float32Array {
+  type Level = { w: number; h: number; c: Float32Array; wt: Float32Array };
+  const base: Level = { w, h, c: new Float32Array(w * h * ch), wt: new Float32Array(w * h) };
+  for (let i = 0; i < w * h; i++)
+    if (known[i]) {
+      base.wt[i] = 1;
+      for (let k = 0; k < ch; k++) base.c[i * ch + k] = vals[i * ch + k];
+    }
+  const levels = [base];
+  const acc = new Float64Array(ch);
+  for (let cur = base; cur.w > 1 || cur.h > 1; ) {
+    const nw = Math.ceil(cur.w / 2);
+    const nh = Math.ceil(cur.h / 2);
+    const next: Level = { w: nw, h: nh, c: new Float32Array(nw * nh * ch), wt: new Float32Array(nw * nh) };
+    let full = true;
+    for (let y = 0; y < nh; y++)
+      for (let x = 0; x < nw; x++) {
+        let sum = 0;
+        acc.fill(0);
+        for (let dy = 0; dy < 2; dy++)
+          for (let dx = 0; dx < 2; dx++) {
+            const sx = 2 * x + dx;
+            const sy = 2 * y + dy;
+            if (sx >= cur.w || sy >= cur.h) continue;
+            const i = sy * cur.w + sx;
+            const wt = cur.wt[i];
+            if (!wt) continue;
+            sum += wt;
+            for (let k = 0; k < ch; k++) acc[k] += cur.c[i * ch + k] * wt;
+          }
+        const j = y * nw + x;
+        if (sum > 0) {
+          for (let k = 0; k < ch; k++) next.c[j * ch + k] = acc[k] / sum;
+          next.wt[j] = Math.min(1, sum);
+        } else full = false;
+      }
+    levels.push(next);
+    cur = next;
+    if (full) break;
+  }
+  const relax = (lv: Level, free: number[]) => {
+    const { w: W, h: H, c } = lv;
+    for (let it = 0; it < sweeps; it++)
+      for (let f = 0; f < free.length; f++) {
+        const i = free[f];
+        const x = i % W;
+        const y = (i - x) / W;
+        const l = x > 0 ? i - 1 : -1;
+        const r = x < W - 1 ? i + 1 : -1;
+        const u = y > 0 ? i - W : -1;
+        const d = y < H - 1 ? i + W : -1;
+        const cnt = (l >= 0 ? 1 : 0) + (r >= 0 ? 1 : 0) + (u >= 0 ? 1 : 0) + (d >= 0 ? 1 : 0);
+        for (let k = 0; k < ch; k++) {
+          let sum = 0;
+          if (l >= 0) sum += c[l * ch + k];
+          if (r >= 0) sum += c[r * ch + k];
+          if (u >= 0) sum += c[u * ch + k];
+          if (d >= 0) sum += c[d * ch + k];
+          c[i * ch + k] = sum / cnt;
+        }
+      }
+  };
+  {
+    const top = levels[levels.length - 1];
+    const free: number[] = [];
+    for (let i = 0; i < top.w * top.h; i++) if (top.wt[i] < 1) free.push(i);
+    relax(top, free);
+  }
+  for (let l = levels.length - 2; l >= 0; l--) {
+    const fine = levels[l];
+    const coarse = levels[l + 1];
+    const free: number[] = [];
+    for (let y = 0; y < fine.h; y++) {
+      const fy = Math.min(coarse.h - 1, Math.max(0, (y + 0.5) / 2 - 0.5));
+      const cy0 = Math.floor(fy);
+      const cy1 = Math.min(coarse.h - 1, cy0 + 1);
+      const ty = fy - cy0;
+      for (let x = 0; x < fine.w; x++) {
+        const i = y * fine.w + x;
+        const wt = fine.wt[i];
+        if (wt >= 1) continue;
+        free.push(i);
+        const fx = Math.min(coarse.w - 1, Math.max(0, (x + 0.5) / 2 - 0.5));
+        const cx0 = Math.floor(fx);
+        const cx1 = Math.min(coarse.w - 1, cx0 + 1);
+        const tx = fx - cx0;
+        for (let k = 0; k < ch; k++) {
+          const a = coarse.c[(cy0 * coarse.w + cx0) * ch + k];
+          const b = coarse.c[(cy0 * coarse.w + cx1) * ch + k];
+          const c = coarse.c[(cy1 * coarse.w + cx0) * ch + k];
+          const d = coarse.c[(cy1 * coarse.w + cx1) * ch + k];
+          const up = (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
+          fine.c[i * ch + k] = wt * fine.c[i * ch + k] + (1 - wt) * up;
+        }
+        fine.wt[i] = 1;
+      }
+    }
+    // Pixels the known values do not fully cover settle between their neighbours.
+    relax(fine, free);
+  }
+  return base.c;
 }
 
 /**
