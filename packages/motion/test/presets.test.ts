@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AnimationState, Skeleton, SkeletonData, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
+import { AnimationState, Skeleton, SkeletonData, resolveCurve, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
 import { PRESETS, applyPreset, describePresets, mergeAnimations, patchAnimation } from '../src/index.ts';
 
 const root = join(import.meta.dirname, '../../..');
@@ -113,7 +113,50 @@ describe('presets', () => {
     idle = mergeAnimations(idle, applyPreset(data, 'sway', { bones: ['tail1', 'tail2'] }));
     idle = mergeAnimations(idle, applyPreset(data, 'blink', { slot: 'eyes', closed: 'eyes_closed', times: [1.5] }));
     expect(Object.keys(idle.bones!).sort()).toEqual(['hip', 'tail1', 'tail2']);
-    expect(idle.slots!.eyes.attachment).toHaveLength(2);
+    // Open until the blink at 1.5 s, shut, open again.
+    expect(idle.slots!.eyes.attachment!.map((k) => [k.time, k.name])).toEqual([[0, 'eyes'], [1.5, 'eyes_closed'], [1.62, 'eyes']]);
+  });
+
+  it('re-applies a preset without doubling its events, and sequences presets on one bone', () => {
+    const data = SkeletonData.fromJSON(load('gem'));
+    let a = applyPreset(data, 'symbol_land', {});
+    a = mergeAnimations(a, applyPreset(data, 'symbol_land', { drop: 60 }));
+    expect(a.events!.map((e) => e.name)).toEqual(['land']);
+    expect(a.bones!.gem.translate![0].y).toBe(-60);
+    // land, then win from 0.5 s: the squash keys before 0.5 s stay.
+    const seq = mergeAnimations(applyPreset(data, 'symbol_land', {}), applyPreset(data, 'symbol_win', { start: 0.5 }));
+    const times = seq.bones!.gem.scale!.map((k) => k.time);
+    expect(times[0]).toBe(0);
+    expect(times).toContain(0.5);
+    expect(seq.events!.map((e) => e.name)).toEqual(['land']);
+  });
+
+  it('sways with continuous speed, also across the loop seam', () => {
+    const data = SkeletonData.fromJSON(load('kit'));
+    const anim = applyPreset(data, 'sway', { bones: ['tail1', 'tail2', 'tail3', 'tail4'] });
+    const keys = anim.bones!.tail4.rotate!;
+    const period = keys[keys.length - 1].time;
+    const value = (t: number) => {
+      const i = keys.findIndex((k, j) => keys[j + 1] && t >= k.time && t <= keys[j + 1].time);
+      const a = keys[i];
+      const b = keys[i + 1];
+      const u = (t - a.time) / (b.time - a.time);
+      const ease = a.curve ? resolveCurve(a.curve)! : (x: number) => x;
+      return a.value + (b.value - a.value) * ease(u);
+    };
+    const h = 1e-3;
+    const speedEnd = (value(period) - value(period - h)) / h;
+    const speedStart = (value(h) - value(0)) / h;
+    expect(Math.abs(speedEnd - speedStart)).toBeLessThan(Math.max(1, Math.abs(speedStart) * 0.05));
+    // And at every inner key.
+    for (const k of keys.slice(1, -1)) expect(Math.abs((value(k.time + h) - value(k.time)) / h - (value(k.time) - value(k.time - h)) / h)).toBeLessThan(2);
+  });
+
+  it('defaults to the bone carrying most of the visible art, and keeps attachments at rest before "start"', () => {
+    expect(Object.keys(applyPreset(SkeletonData.fromJSON(load('kit')), 'pop_in', {}).bones!)).toEqual(['hip']);
+    expect(Object.keys(applyPreset(SkeletonData.fromJSON(load('coin')), 'pop_in', {}).bones!)).toEqual(['coin']);
+    const talk = applyPreset(SkeletonData.fromJSON(load('kit')), 'talk', { slot: 'mouth', open: 'mouth_open', start: 1 });
+    expect(talk.slots!.mouth.attachment![0]).toEqual({ time: 0, name: 'mouth' });
   });
 
   it('describes every preset', () => {

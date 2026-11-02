@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import {
   SkeletonData,
@@ -34,6 +34,51 @@ export type Decoder = (bytes: Uint8Array, fileName: string) => Promise<RGBAImage
 /** Segmenting a big picture takes seconds; keep the last few results by file, date and settings. */
 const pictures = new Map<string, ReturnType<typeof readPicture>>();
 
+let tmpCount = 0;
+/** Writes a file whole or not at all (temp file + rename), so a crash or a concurrent reader never sees half of it. */
+export async function writeAtomic(path: string, data: string | Uint8Array): Promise<void> {
+  const tmp = `${path}.${process.pid}.${++tmpCount}.tmp`;
+  await writeFile(tmp, data);
+  await rename(tmp, path);
+}
+
+/** Pending work per project folder: changes to one project run one after another. */
+const locks = new Map<string, Promise<unknown>>();
+
+/** Animation timelines that point at bones, slots, IK constraints or attachments the skeleton lacks. */
+export function staleTimelines(file: L2DFile, animations: Record<string, L2DAnimation>): { clean: Record<string, L2DAnimation>; removed: string[] } {
+  const bones = new Set(file.bones.map((b) => b.name));
+  const slots = new Set(file.slots.map((s) => s.name));
+  const ik = new Set((file.ik ?? []).map((c) => c.name));
+  const removed: string[] = [];
+  const clean = structuredClone(animations);
+  for (const [name, anim] of Object.entries(clean)) {
+    for (const b of Object.keys(anim.bones ?? {}))
+      if (!bones.has(b)) {
+        delete anim.bones![b];
+        removed.push(`animations.${name}.bones.${b}`);
+      }
+    for (const [s, tl] of Object.entries(anim.slots ?? {})) {
+      if (!slots.has(s)) {
+        delete anim.slots![s];
+        removed.push(`animations.${name}.slots.${s}`);
+        continue;
+      }
+      const names = new Set(Object.keys(file.attachments[s] ?? {}));
+      if (tl.attachment?.some((k) => k.name !== null && !names.has(k.name))) {
+        delete tl.attachment;
+        removed.push(`animations.${name}.slots.${s}.attachment`);
+      }
+    }
+    for (const c of Object.keys(anim.ik ?? {}))
+      if (!ik.has(c)) {
+        delete anim.ik![c];
+        removed.push(`animations.${name}.ik.${c}`);
+      }
+  }
+  return { clean, removed };
+}
+
 /** Rig spec as stored in a project: the build spec plus where the art lives. */
 export type ProjectSpec = RigSpec & { art?: string };
 
@@ -54,6 +99,19 @@ export class Project {
 
   constructor(dir: string) {
     this.dir = resolve(dir);
+  }
+
+  /** Runs `fn` after every earlier change to this project folder (from this process) is done. */
+  async locked<T>(fn: () => Promise<T>): Promise<T> {
+    const before = locks.get(this.dir) ?? Promise.resolve();
+    const run = before.then(fn, fn);
+    const settled = run.catch(() => {});
+    locks.set(this.dir, settled);
+    try {
+      return await run;
+    } finally {
+      if (locks.get(this.dir) === settled) locks.delete(this.dir);
+    }
   }
 
   get specPath() {
@@ -78,7 +136,7 @@ export class Project {
   }
 
   async writeSplit(split: ProjectSplit): Promise<void> {
-    await writeFile(this.splitPath, JSON.stringify(split, null, 2) + '\n');
+    await writeAtomic(this.splitPath, JSON.stringify(split, null, 2) + '\n');
   }
 
   /** The flat picture with its background removed and its segmentation (cached). */
@@ -107,7 +165,7 @@ export class Project {
     const rig = await this.requireSpec();
     const psd = resolve(this.dir, rig.art ?? join('source', `${rig.name}.psd`));
     await mkdir(join(psd, '..'), { recursive: true });
-    await writeFile(psd, writePsd(result.art));
+    await writeAtomic(psd, writePsd(result.art));
     await this.writeSplit({ picture: split.picture, background: split.background, detail: split.detail, ...spec });
     return { ...result, psd };
   }
@@ -132,7 +190,7 @@ export class Project {
 
   async writeSpec(spec: ProjectSpec): Promise<void> {
     await mkdir(this.dir, { recursive: true });
-    await writeFile(this.specPath, JSON.stringify(spec, null, 2) + '\n');
+    await writeAtomic(this.specPath, JSON.stringify(spec, null, 2) + '\n');
   }
 
   async readArt(): Promise<LayeredArt> {
@@ -181,30 +239,63 @@ export class Project {
    * Returns the skeleton's validation result; nothing is written if it has errors.
    */
   async writeAnimations(animations: Record<string, L2DAnimation>): Promise<ValidationResult> {
+    return this.locked(() => this.saveAnimations(animations));
+  }
+
+  /**
+   * Reads the animations, changes them with `fn` and saves them, with no other change to this
+   * project in between (two tools at once cannot lose each other's work).
+   */
+  async updateAnimations(
+    fn: (animations: Record<string, L2DAnimation>) => Record<string, L2DAnimation> | void,
+  ): Promise<{ result: ValidationResult; animations: Record<string, L2DAnimation> }> {
+    return this.locked(async () => {
+      const animations = await this.readAnimations();
+      const next = fn(animations) ?? animations;
+      return { result: await this.saveAnimations(next), animations: next };
+    });
+  }
+
+  private async saveAnimations(animations: Record<string, L2DAnimation>): Promise<ValidationResult> {
     const path = await this.requireSkeletonPath();
     const file = JSON.parse(await readFile(path, 'utf8')) as L2DFile;
     file.animations = animations;
     const result = validate(file);
     if (!result.ok) return result;
-    await writeFile(this.animationsPath, JSON.stringify(animations, null, 2) + '\n');
-    await writeFile(path, JSON.stringify(file, null, 2) + '\n');
+    await writeAtomic(this.animationsPath, JSON.stringify(animations, null, 2) + '\n');
+    await writeAtomic(path, JSON.stringify(file, null, 2) + '\n');
     return result;
   }
 
-  /** Rigs the art with rig.json (+ animations.json), writes the skeleton and runs the bend test. */
-  async build(): Promise<{ result: RigResult; bend: BendReport; path: string }> {
-    const spec = await this.requireSpec();
-    const art = await this.readArt();
-    const { art: _art, ...rigSpec } = spec;
-    const result = buildRig(art, rigSpec, await this.readAnimations());
-    await mkdir(join(this.dir, 'images'), { recursive: true });
-    for (const [name, png] of Object.entries(result.images)) await writeFile(join(this.dir, 'images', `${name}.png`), png);
-    const path = join(this.dir, `${spec.name}.l2d.json`);
-    await writeFile(path, JSON.stringify(result.file, null, 2) + '\n');
-    if (!(await this.exists(this.animationsPath)))
-      await writeFile(this.animationsPath, JSON.stringify(result.file.animations, null, 2) + '\n');
-    const bend = bendTest(SkeletonData.fromJSON(result.file));
-    return { result, bend, path };
+  /**
+   * Rigs the art with rig.json (+ animations.json), writes the skeleton and runs the bend test.
+   * Animation timelines of bones, slots, IK constraints or attachments the new rig no longer has
+   * are dropped from animations.json and listed in `removed`; a skeleton left from an earlier
+   * name is deleted.
+   */
+  async build(): Promise<{ result: RigResult; bend: BendReport; path: string; removed: string[]; replaced: string[] }> {
+    return this.locked(async () => {
+      const spec = await this.requireSpec();
+      const art = await this.readArt();
+      const { art: _art, ...rigSpec } = spec;
+      const rig = buildRig(art, rigSpec, {});
+      const { clean, removed } = staleTimelines(rig.file, await this.readAnimations());
+      const result = buildRig(art, rigSpec, clean);
+      await mkdir(join(this.dir, 'images'), { recursive: true });
+      for (const [name, png] of Object.entries(result.images)) await writeAtomic(join(this.dir, 'images', `${name}.png`), png);
+      const path = join(this.dir, `${spec.name}.l2d.json`);
+      await writeAtomic(path, JSON.stringify(result.file, null, 2) + '\n');
+      if (removed.length || !(await this.exists(this.animationsPath)))
+        await writeAtomic(this.animationsPath, JSON.stringify(result.file.animations, null, 2) + '\n');
+      const replaced: string[] = [];
+      for (const f of await readdir(this.dir))
+        if (f.endsWith('.l2d.json') && join(this.dir, f) !== path) {
+          await rm(join(this.dir, f));
+          replaced.push(f);
+        }
+      const bend = bendTest(SkeletonData.fromJSON(result.file));
+      return { result, bend, path, removed, replaced };
+    });
   }
 
   /**
@@ -223,7 +314,7 @@ export class Project {
     const artName = basename(artPath);
     const target = join(project.dir, 'source', artName);
     if (resolve(artPath) !== target) await copyFile(resolve(artPath), target);
-    const name = (options.name ?? basename(dir)).replace(/[^A-Za-z0-9_-]+/g, '_');
+    const name = (options.name ?? basename(project.dir)).replace(/[^A-Za-z0-9_-]+/g, '_');
 
     let art: LayeredArt;
     let artFile = target;
@@ -269,7 +360,7 @@ export class Project {
       parts: {},
     };
     await project.writeSpec(spec);
-    if (!(await project.exists(project.animationsPath))) await writeFile(project.animationsPath, '{}\n');
+    if (!(await project.exists(project.animationsPath))) await writeAtomic(project.animationsPath, '{}\n');
     return { project, art, spec, picture };
   }
 }

@@ -129,8 +129,9 @@ export async function packAtlas(file: L2DFile, load: (path: string) => Promise<U
         rest = left;
         break;
       }
-      if (h < w) h *= 2;
-      else w *= 2;
+      // Grow the shorter side, never past maxSize (which need not be a power of two).
+      if (h < w || w >= maxSize) h = Math.min(maxSize, h * 2);
+      else w = Math.min(maxSize, w * 2);
     }
   }
 

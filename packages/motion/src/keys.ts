@@ -7,24 +7,30 @@ export const r3 = (x: number) => {
 };
 
 /**
- * Seamless looping sway v(t) = amp * sin(2π (t - lag) / period) over one period, as keys at
- * the extremes (exact at the loop seam, so it repeats without a hitch).
+ * Seamless looping sway v(t) = amp * sin(2π (t - lag) / period) over one period: keys at the
+ * zero crossings and extremes (and the loop seam), each segment a cubic Bézier matching the sine's
+ * slope at both ends, so the speed is continuous everywhere, the seam included.
  */
 export function swayKeys(amp: number, period: number, lag = 0, start = 0): L2DValueKey[] {
-  const v = (t: number) => amp * Math.sin((2 * Math.PI * (t - lag)) / period);
-  const extremes = [lag + period / 4, lag + (3 * period) / 4]
-    .map((t) => ((t % period) + period) % period)
-    .filter((t) => t > 1e-6 && t < period - 1e-6)
-    .sort((a, b) => a - b);
-  return [
-    { time: r3(start), value: r3(v(0)), curve: 'easeOutSine' },
-    ...extremes.map((t, i) => ({
-      time: r3(start + t),
-      value: r3(v(t)),
-      curve: i === extremes.length - 1 ? 'easeInSine' : sine,
-    })),
-    { time: r3(start + period), value: r3(v(period)) },
-  ];
+  const w = (2 * Math.PI) / period;
+  const v = (t: number) => amp * Math.sin(w * (t - lag));
+  const slope = (t: number) => amp * w * Math.cos(w * (t - lag));
+  const times = [0, period];
+  for (let k = 0; k < 4; k++) {
+    const t = (((lag + (k * period) / 4) % period) + period) % period;
+    if (t > 1e-6 && t < period - 1e-6) times.push(t);
+  }
+  times.sort((a, b) => a - b);
+  return times.map((t, i) => {
+    const key: L2DValueKey = { time: r3(start + t), value: r3(v(t)) };
+    const next = times[i + 1];
+    if (next === undefined) return key;
+    const dt = next - t;
+    const dv = v(next) - v(t);
+    // Hermite to Bézier: control points a third of the way along the end tangents.
+    if (Math.abs(dv) > 1e-9) key.curve = [0.333, r3((slope(t) * dt) / 3 / dv), 0.667, r3(1 - (slope(next) * dt) / 3 / dv)];
+    return key;
+  });
 }
 
 /** Uniform scale keys from [time, scale, curve?] tuples. */
@@ -66,18 +72,48 @@ export function strip(anim: L2DAnimation): L2DAnimation {
 }
 
 /**
- * Merges `add` into `base`: timelines in `add` replace the same bone/slot timeline in `base`,
- * everything else is kept. Events are combined. Duration is the longer of the two.
+ * Merges `add` into `base`. For each timeline in `add`, its keys replace those of the same
+ * timeline in `base` from its first key on; earlier keys stay, so presets placed one after the
+ * other with "start" add up, and re-applying a preset replaces it. Events `add` fires replace
+ * events of the same name from that time on. Everything else is kept; the duration covers the
+ * result.
  */
 export function mergeAnimations(base: L2DAnimation, add: L2DAnimation): L2DAnimation {
-  const out: L2DAnimation = structuredClone(base);
-  for (const [b, tl] of Object.entries(add.bones ?? {})) out.bones = { ...out.bones, [b]: { ...out.bones?.[b], ...tl } };
-  for (const [s, tl] of Object.entries(add.slots ?? {})) out.slots = { ...out.slots, [s]: { ...out.slots?.[s], ...tl } };
-  for (const [n, tl] of Object.entries(add.ik ?? {})) out.ik = { ...out.ik, [n]: { ...out.ik?.[n], ...tl } };
-  if (add.events?.length) out.events = [...(out.events ?? []), ...add.events].sort((a, b) => a.time - b.time);
-  if (add.duration !== undefined || base.duration !== undefined)
-    out.duration = Math.max(add.duration ?? 0, base.duration ?? 0, lastKeyTime(add), lastKeyTime(base));
+  const out = structuredClone(base) as L2DAnimation & Record<string, unknown>;
+  const join = (old: { time: number }[] | undefined, keys: { time: number }[]) => {
+    const from = keys[0]?.time ?? 0;
+    return [...(old ?? []).filter((k) => k.time < from - 1e-6), ...structuredClone(keys)];
+  };
+  for (const group of ['bones', 'slots', 'ik'] as const) {
+    const adds = add[group] as Record<string, Record<string, { time: number }[]>> | undefined;
+    if (!adds) continue;
+    const g = ((out[group] as Record<string, Record<string, { time: number }[]>> | undefined) ?? {}) as Record<string, Record<string, { time: number }[]>>;
+    for (const [target, channels] of Object.entries(adds)) {
+      const t = (g[target] ??= {});
+      for (const [channel, keys] of Object.entries(channels)) if (keys) t[channel] = join(t[channel], keys);
+    }
+    (out as Record<string, unknown>)[group] = g;
+  }
+  if (add.events?.length) {
+    const from = Math.min(...add.events.map((e) => e.time), firstKeyTime(add));
+    const names = new Set(add.events.map((e) => e.name));
+    out.events = [...(out.events ?? []).filter((e) => !(names.has(e.name) && e.time >= from - 1e-6)), ...structuredClone(add.events)].sort((a, b) => a.time - b.time);
+  }
+  if (add.duration !== undefined || base.duration !== undefined) {
+    delete out.duration;
+    out.duration = Math.max(add.duration ?? 0, lastKeyTime(out));
+  }
   return strip(out);
+}
+
+/** Time of the earliest key in an animation (Infinity if it has none). */
+function firstKeyTime(anim: L2DAnimation): number {
+  let t = Infinity;
+  const scan = (keys?: { time: number }[]) => keys?.forEach((k) => (t = Math.min(t, k.time)));
+  for (const tl of Object.values(anim.bones ?? {})) (scan(tl.rotate), scan(tl.translate), scan(tl.scale));
+  for (const tl of Object.values(anim.slots ?? {})) (scan(tl.color), scan(tl.alpha), scan(tl.attachment));
+  for (const tl of Object.values(anim.ik ?? {})) scan(tl.mix);
+  return t;
 }
 
 export function lastKeyTime(anim: L2DAnimation): number {

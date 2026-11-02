@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { validate, type L2DFile } from '@llm2d/core';
 import { packAtlas, type AtlasOptions } from './atlas.ts';
@@ -26,6 +26,8 @@ export async function exportSkeleton(path: string, dest: string, options: Export
   const check = validate(file);
   if (!check.ok) throw new Error(`Cannot export an invalid skeleton:\n${check.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
   const dir = resolve(dest, file.name);
+  if (dir === dirname(src))
+    throw new Error(`Exporting into ${dir} would overwrite the project's own ${file.name}.l2d.json; export into another folder (e.g. the game's assets).`);
   await mkdir(dir, { recursive: true });
   const written: string[] = [];
   let out = file;
@@ -33,6 +35,9 @@ export async function exportSkeleton(path: string, dest: string, options: Export
 
   if (options.atlas ?? true) {
     const atlas = await packAtlas(file, (p) => readFile(join(dirname(src), p)), options);
+    // Pages from an earlier export that this one no longer makes (fewer pages now).
+    const page = new RegExp(`^${file.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-\\d+)?\\.png$`);
+    for (const f of await readdir(dir)) if (page.test(f) && !(f in atlas.pages)) await rm(join(dir, f));
     for (const [name, png] of Object.entries(atlas.pages)) {
       await writeFile(join(dir, name), png);
       written.push(join(dir, name));

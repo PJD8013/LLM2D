@@ -97,7 +97,7 @@ describe('llm2d MCP server', () => {
     }
     const idle = JSON.parse((await call('get_animation', { dir, name: 'idle' })).text);
     expect(Object.keys(idle.bones).sort()).toEqual(['hip', 'tail1', 'tail2', 'tail3', 'tail4']);
-    expect(idle.slots.eyes.attachment).toHaveLength(2);
+    expect(idle.slots.eyes.attachment.map((k: { name: string }) => k.name)).toEqual(['eyes', 'eyes_closed', 'eyes']);
 
     // Patch only the tail of idle: the other timelines stay.
     const patched = await call('set_animation', { dir, name: 'idle', mode: 'patch', animation: { bones: { tail4: { rotate: [{ time: 0, value: 5 }, { time: 1, value: -5 }] }, tail3: { rotate: [] } } }, preview: false });
@@ -105,7 +105,7 @@ describe('llm2d MCP server', () => {
     const after = JSON.parse((await call('get_animation', { dir, name: 'idle' })).text);
     expect(Object.keys(after.bones).sort()).toEqual(['hip', 'tail1', 'tail2', 'tail4']);
     expect(after.bones.tail4.rotate).toHaveLength(2);
-    expect(after.slots.eyes.attachment).toHaveLength(2);
+    expect(after.slots.eyes.attachment).toHaveLength(3);
     expect((await call('set_animation', { dir, name: 'nope', mode: 'patch', animation: {}, preview: false })).isError).toBe(true);
 
     const valid = await call('validate_project', { dir });
@@ -132,6 +132,40 @@ describe('llm2d MCP server', () => {
     expect(preset.text).toContain('unknown bone "tail9"');
     const missing = await call('delete_animation', { dir, name: 'nope' });
     expect(missing.isError).toBe(true);
+  });
+
+  it('keeps parallel writes, survives renamed bones, refuses unsafe exports and misspelled arguments', async () => {
+    // Four presets into four animations at once: none lost, files intact.
+    const results = await Promise.all(
+      ['a1', 'a2', 'a3', 'a4'].map((animation) => call('apply_preset', { dir, animation, preset: 'breathe', params: { bone: 'hip' }, preview: false })),
+    );
+    for (const r of results) expect(r.isError, r.text).toBeFalsy();
+    const saved = JSON.parse(readFileSync(join(dir, 'animations.json'), 'utf8'));
+    expect(['a1', 'a2', 'a3', 'a4'].every((n) => n in saved)).toBe(true);
+    expect(Object.keys(JSON.parse(readFileSync(join(dir, 'fox.l2d.json'), 'utf8')).animations)).toEqual(expect.arrayContaining(['a1', 'a2', 'a3', 'a4']));
+
+    // Rename the hip: rebuilding drops the keys of the old name and says so.
+    const spec = JSON.parse((await call('get_rig_spec', { dir })).text);
+    const renamed = JSON.parse(JSON.stringify(spec).replaceAll('"hip"', '"pelvis"'));
+    delete renamed.scale; // left out: keeps the saved scale
+    expect((await call('set_rig_spec', { dir, spec: renamed, image: false })).isError).toBeFalsy();
+    expect(JSON.parse((await call('get_rig_spec', { dir })).text).scale).toBe(spec.scale);
+    const built = await call('build_rig', { dir, bend_sheet: false });
+    expect(built.isError, built.text).toBeFalsy();
+    expect(built.text).toContain('animations.a1.bones.hip');
+    expect((await call('apply_preset', { dir, animation: 'a1', preset: 'breathe', params: { bone: 'pelvis' }, preview: false })).isError).toBeFalsy();
+
+    // Exporting into the project's parent would overwrite the project's skeleton.
+    const self = await call('export_project', { dir, dest: join(dir, '..') });
+    expect(self.isError).toBe(true);
+    expect(self.text).toMatch(/overwrite/);
+    // A misspelled argument is reported, not ignored.
+    const typo = await call('export_project', { dir, dest: join(dir, '..', 'game2'), maxSize: 512 });
+    expect(typo.isError).toBe(true);
+    expect(typo.text).toMatch(/maxSize/);
+    // A bad art path is refused before rig.json changes.
+    expect((await call('set_rig_spec', { dir, spec: { ...renamed, art: 'nope.psd' }, image: false })).isError).toBe(true);
+    expect(JSON.parse((await call('get_rig_spec', { dir })).text).art).toBe(spec.art);
   });
 
   it('starts from a flat picture: regions, split into layers, rig', async () => {

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from 'playwright';
@@ -71,7 +71,11 @@ export class Previewer {
   async loadFile(path: string, key?: string): Promise<L2DFile> {
     const text = await readFile(path, 'utf8');
     const file = JSON.parse(text) as L2DFile;
-    const cacheKey = `${path}\u0000${key ?? ''}\u0000${text}`;
+    // Images can change while the JSON does not (new art, same rig): their dates count too.
+    const stamps = await Promise.all(
+      [...new Set(Object.values(file.images ?? {}).map((i) => i.path))].map(async (p) => `${p}@${await stat(join(dirname(path), p)).then((s) => s.mtimeMs, () => 0)}`),
+    );
+    const cacheKey = `${path}\u0000${key ?? ''}\u0000${text}\u0000${stamps.join('|')}`;
     if (cacheKey === this.loadedKey && this.page) return file;
     const pages: Record<string, Uint8Array> = {};
     for (const img of Object.values(file.images ?? {})) pages[img.path] ??= await readFile(join(dirname(path), img.path));

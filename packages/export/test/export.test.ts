@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -94,6 +94,9 @@ describe('packAtlas', () => {
     const again = await packAtlas(atlas.file, async (p) => atlas.pages[p], { maxSize: 1024 });
     expect(Object.keys(again.pages)).toEqual(['multi.png']);
     expect(validate(again.file).ok).toBe(true);
+    // A page limit that is not a power of two is still a limit.
+    const odd = await packAtlas(file, async () => encodePng(solid(200, 200)), { maxSize: 700 });
+    for (const page of odd.report.pages) expect(Math.max(page.width, page.height)).toBeLessThanOrEqual(700);
   });
 });
 
@@ -106,5 +109,12 @@ describe('exportSkeleton', () => {
     expect(validate(JSON.parse(json)).ok).toBe(true);
     const half = await exportSkeleton(join(root, 'samples/bolt/bolt.l2d.json'), join(dest, 'half'), { scale: 0.5 });
     expect(half.pages[0].width).toBeLessThan(full.pages[0].width);
+    // Re-exporting with fewer pages removes the pages left from before.
+    const many = await exportSkeleton(join(root, 'samples/kit/kit.l2d.json'), dest, { maxSize: 700 });
+    expect(many.pages.length).toBeGreaterThan(1);
+    const one = await exportSkeleton(join(root, 'samples/kit/kit.l2d.json'), dest);
+    expect(readdirSync(one.dir).filter((f) => f.endsWith('.png'))).toEqual(one.pages.map((p) => p.name));
+    // Never into the skeleton's own folder.
+    await expect(exportSkeleton(join(root, 'samples/kit/kit.l2d.json'), join(root, 'samples'))).rejects.toThrow(/overwrite/);
   });
 });

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { CURVE_NAMES, Skeleton, SkeletonData, bendTest, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
@@ -143,7 +144,8 @@ export function createServer() {
       {
         title: config.title,
         description: config.description,
-        inputSchema: config.input,
+        // Strict: a misspelled argument is an error naming it, not silently ignored.
+        inputSchema: z.object(config.input).strict(),
         annotations: { readOnlyHint: !!config.readOnly, destructiveHint: !!config.destructive, openWorldHint: false },
       },
       (async (args: any): Promise<Result> => {
@@ -349,8 +351,13 @@ export function createServer() {
     async (a) => {
       const project = new Project(a.dir);
       const old = await project.readSpec();
-      const spec: ProjectSpec = { ...a.spec, art: a.spec.art ?? old?.art } as ProjectSpec;
+      // Settings left out keep their saved values (create_project chose art and scale).
+      const spec: ProjectSpec = { ...a.spec, art: a.spec.art ?? old?.art, scale: a.spec.scale ?? old?.scale } as ProjectSpec;
+      if (spec.scale === undefined) delete spec.scale;
       if (!spec.art) throw new Error('spec.art is missing; give the PSD path relative to the project folder.');
+      const artPath = resolve(project.dir, spec.art);
+      if (!(await project.exists(artPath)) && !(await project.readSplit()))
+        throw new Error(`spec.art: no file at ${artPath}. Give the PSD path relative to the project folder (rig.json was not changed).`);
       await project.writeSpec(spec);
       const art = await project.readArt();
       const layers = new Set(art.layers.map((l) => l.name));
@@ -388,7 +395,7 @@ export function createServer() {
     },
     async (a) => {
       const project = new Project(a.dir);
-      const { result, bend, path } = await project.build();
+      const { result, bend, path, removed, replaced } = await project.build();
       const parts = result.report.parts
         .map((p) => `  ${p.layer}: ${p.kind}${p.kind === 'mesh' ? ` ${p.vertices}v` : ''} -> ${p.bones.join(', ')}${p.auto ? ' (auto)' : ''}${p.slot !== p.layer ? ` [slot ${p.slot}]` : ''}`)
         .join('\n');
@@ -399,6 +406,10 @@ export function createServer() {
         text(
           `Built ${path}: ${result.file.bones.length} bones, ${result.file.slots.length} slots, ${Object.keys(result.file.animations).length} animations.\n${parts}\n${chains}\n` +
             (result.report.warnings.length ? `Warnings:\n  ${result.report.warnings.join('\n  ')}\n` : '') +
+            (removed.length
+              ? `Removed from animations.json (their bone, slot, IK or attachment is gone from the rig; key them again on the new names):\n  ${removed.join('\n  ')}\n`
+              : '') +
+            (replaced.length ? `Deleted the skeleton built under an earlier name: ${replaced.join(', ')}\n` : '') +
             `${bend.summary}\n${bend.issues.map((i) => `  ${i.severity}: ${i.message}`).join('\n')}`,
         ),
       ];
@@ -511,10 +522,11 @@ export function createServer() {
       const project = new Project(a.dir);
       const data = SkeletonData.fromJSON(await project.readSkeleton());
       const keys = applyPreset(data, a.preset, a.params);
-      const animations = await project.readAnimations();
-      const before = animations[a.animation];
-      animations[a.animation] = a.mode === 'merge' && before ? mergeAnimations(before, keys) : keys;
-      const result = await project.writeAnimations(animations);
+      let before: L2DAnimation | undefined;
+      const { result } = await project.updateAnimations((animations) => {
+        before = animations[a.animation];
+        animations[a.animation] = a.mode === 'merge' && before ? mergeAnimations(before, keys) : keys;
+      });
       if (!result.ok) throw new Error(`Result is invalid:\n${result.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
       const preset = findPreset(a.preset);
       const out: Content[] = [
@@ -547,10 +559,10 @@ export function createServer() {
     },
     async (a) => {
       const project = new Project(a.dir);
-      const animations = await project.readAnimations();
-      if (a.mode === 'patch' && !animations[a.name]) throw new Error(`No animation "${a.name}" to patch. Use mode "replace" to create it.`);
-      animations[a.name] = a.mode === 'patch' ? patchAnimation(animations[a.name], a.animation as L2DAnimation) : (a.animation as L2DAnimation);
-      const result = await project.writeAnimations(animations);
+      const { result } = await project.updateAnimations((animations) => {
+        if (a.mode === 'patch' && !animations[a.name]) throw new Error(`No animation "${a.name}" to patch. Use mode "replace" to create it.`);
+        animations[a.name] = a.mode === 'patch' ? patchAnimation(animations[a.name], a.animation as L2DAnimation) : (a.animation as L2DAnimation);
+      });
       if (!result.ok) throw new Error(`Not saved. Fix these:\n${result.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
       const warn = result.warnings.filter((w) => w.path.startsWith(`animations.${a.name}`));
       const out: Content[] = [text(`Saved "${a.name}".${warn.length ? ` Warnings: ${warn.map((w) => `${w.path}: ${w.message}`).join('; ')}` : ''}`)];
@@ -575,10 +587,11 @@ export function createServer() {
     { title: 'Delete animation', description: 'Removes one animation from animations.json and the built skeleton.', input: { dir: dirArg, name: z.string() }, destructive: true },
     async (a) => {
       const project = new Project(a.dir);
-      const animations = await project.readAnimations();
-      if (!animations[a.name]) throw new Error(`No animation "${a.name}".`);
-      delete animations[a.name];
-      await project.writeAnimations(animations);
+      const { result, animations } = await project.updateAnimations((animations) => {
+        if (!animations[a.name]) throw new Error(`No animation "${a.name}". Animations: ${Object.keys(animations).join(', ') || '(none)'}`);
+        delete animations[a.name];
+      });
+      if (!result.ok) throw new Error(`Not deleted: the remaining animations do not validate:\n${result.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
       return [text(`Deleted "${a.name}". Remaining: ${Object.keys(animations).join(', ') || '(none)'}`)];
     },
   );

@@ -65,7 +65,8 @@ export const PRESETS: Preset[] = [
       bones: {
         [p.bone]: {
           translate: swayKeys(p.float, p.period, 0).map((k) => ({ time: k.time, y: k.value, curve: k.curve })),
-          ...(p.pulse ? { scale: swayKeys(p.pulse, p.period, p.period / 4).map((k) => ({ time: k.time, x: r3(1 + k.value), y: r3(1 + k.value), curve: k.curve })) } : {}),
+          // Half a period behind the float, starting (and ending) at rest size.
+          ...(p.pulse ? { scale: swayKeys(p.pulse, p.period, p.period / 2).map((k) => ({ time: k.time, x: r3(1 + k.value), y: r3(1 + k.value), curve: k.curve })) } : {}),
         },
       },
     }),
@@ -391,17 +392,19 @@ export const PRESETS: Preset[] = [
       { name: 'length', type: 'number', default: 0.12, description: 'How long the eyes stay shut.' },
       START,
     ],
-    build: (ctx, p) => ({
-      ...(p.times.length === 1 && p.times[0] === 0 ? { duration: r3(p.length + 0.08) } : {}),
-      slots: {
-        [p.slot]: {
-          attachment: p.times.flatMap((t: number) => [
-            { time: r3(t), name: p.closed },
-            { time: r3(t + p.length), name: p.open },
-          ]),
-        },
-      },
-    }),
+    build: (ctx, p) => {
+      const times = [...(p.times as number[])].sort((a, b) => a - b);
+      const keys = times.flatMap((t) => [
+        { time: r3(t), name: p.closed },
+        { time: r3(t + p.length), name: p.open },
+      ]);
+      // Eyes open until the first blink (the first key is held before it).
+      if (times[0] > 0) keys.unshift({ time: 0, name: p.open });
+      return {
+        ...(times.length === 1 && times[0] === 0 ? { duration: r3(p.length + 0.08) } : {}),
+        slots: { [p.slot]: { attachment: keys } },
+      };
+    },
   },
   {
     name: 'talk',
@@ -571,11 +574,15 @@ export function presetContext(data: SkeletonData): PresetContext {
       return sk.boneWorldRotation(i);
     },
     mainBone() {
-      let best = data.bones[0].name;
-      let area = -1;
+      // Visible art (box area of what each slot shows at setup) per bone, summed over subtrees;
+      // then the deepest bone that still carries most of it: the coin of a coin symbol, the hip
+      // of a character, never an invisible glow or a tail.
+      const sub = new Float64Array(data.bones.length);
       for (const s of data.slots) {
-        if (s.attachment < 0 || s.blend !== 'normal') continue;
-        const v = data.attachments[s.index][s.attachment].vertices;
+        if (s.attachment < 0 || s.color.a <= 0) continue;
+        const m = data.attachments[s.index][s.attachment];
+        if (m.kind === 'clipping') continue;
+        const v = m.vertices;
         let minX = Infinity;
         let minY = Infinity;
         let maxX = -Infinity;
@@ -586,13 +593,17 @@ export function presetContext(data: SkeletonData): PresetContext {
           minY = Math.min(minY, v[i + 1]);
           maxY = Math.max(maxY, v[i + 1]);
         }
-        const a = (maxX - minX) * (maxY - minY);
-        if (a > area) {
-          area = a;
-          best = data.bones[s.bone].name;
-        }
+        sub[s.bone] += (maxX - minX) * (maxY - minY);
       }
-      return best;
+      for (let i = data.bones.length - 1; i > 0; i--) if (data.bones[i].parent >= 0) sub[data.bones[i].parent] += sub[i];
+      let bone = 0;
+      for (;;) {
+        const children = data.bones.filter((b) => b.parent === bone);
+        const best = children.sort((a, b) => sub[b.index] - sub[a.index])[0];
+        if (!best || sub[best.index] < sub[bone] * 0.9) break;
+        bone = best.index;
+      }
+      return data.bones[bone].name;
     },
   };
 }
@@ -667,7 +678,17 @@ export function applyPreset(data: SkeletonData, name: string, params: Record<str
       if (a < 0) throw new Error(`Preset "${name}" needs "${def.name}" because slot "${p[def.slotParam!]}" shows nothing at setup`);
       p[def.name] = data.attachments[si][a].name;
     }
-  return shift(preset.build(ctx, p), p.start ?? 0);
+  const anim = shift(preset.build(ctx, p), p.start ?? 0);
+  // Attachment keys pushed later by "start" would hold their first key before it: show the
+  // slot's setup attachment until then.
+  for (const [slot, tl] of Object.entries(anim.slots ?? {})) {
+    const keys = tl.attachment;
+    if (!keys?.length || keys[0].time <= 0) continue;
+    const si = data.findSlot(slot);
+    const a = data.slots[si].attachment;
+    keys.unshift({ time: 0, name: a < 0 ? null : data.attachments[si][a].name });
+  }
+  return anim;
 }
 
 /** Human/LLM-readable catalogue of presets and their parameters. */
