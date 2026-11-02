@@ -17,6 +17,9 @@ export interface TrackListener {
 
 const EMPTY = new AnimationData('<empty>', 0, [], []);
 
+/** Internal: lets AnimationState move an entry's clock without the seek behaviour of the setter. */
+const moveClock = Symbol('moveClock');
+
 export class TrackEntry {
   readonly animation: AnimationData;
   readonly trackIndex: number;
@@ -24,8 +27,7 @@ export class TrackEntry {
   timeScale = 1;
   /** Weight of this track over the tracks below it (0..1). */
   alpha = 1;
-  /** Seconds elapsed on this entry (already scaled). Negative while waiting on a delay. */
-  trackTime = 0;
+  private _trackTime = 0;
   /** For queued entries: start once the previous entry's trackTime reaches this. */
   delay = 0;
   /** Crossfade length from the previous entry, in seconds. */
@@ -62,6 +64,24 @@ export class TrackEntry {
    */
   get loop(): boolean {
     return this._loop;
+  }
+
+  /**
+   * Seconds elapsed on this entry (already scaled). Negative while waiting on a delay. Setting
+   * it seeks, as in spine: a non-looping animation then shows `min(trackTime, duration)`, even
+   * after looping was switched off part-way.
+   */
+  get trackTime(): number {
+    return this._trackTime;
+  }
+
+  set trackTime(value: number) {
+    this._trackTime = value;
+    this.loopStart = 0;
+  }
+
+  [moveClock](value: number): void {
+    this._trackTime = value;
   }
 
   set loop(value: boolean) {
@@ -314,7 +334,7 @@ export class AnimationState {
   private advance(e: TrackEntry, d: number, events = true): void {
     const t0 = e.trackTime;
     const t1 = t0 + d;
-    e.trackTime = t1;
+    e[moveClock](t1);
     if (d <= 0 || t1 < 0) return;
     const from = Math.max(0, t0);
     const anim = e.animation;

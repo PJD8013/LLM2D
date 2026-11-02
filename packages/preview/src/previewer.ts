@@ -27,31 +27,57 @@ export class Previewer {
   private starting: Promise<Page> | null = null;
   private loadedKey = '';
 
+  /** The viewer page, started on first use and again after the page or the browser went away. */
   private async ensure(): Promise<Page> {
-    if (this.page) return this.page;
-    this.starting ??= (async () => {
+    if (this.page && !this.page.isClosed()) return this.page;
+    if (this.page) this.forget(this.page);
+    this.starting ??= this.start().catch((e) => {
+      this.starting = null;
+      throw e;
+    });
+    return this.starting;
+  }
+
+  /** Drops a dead page so the next call opens a new one (and loads the skeleton again). */
+  private forget(page: Page) {
+    if (this.page !== page) return;
+    this.page = null;
+    this.starting = null;
+    this.loadedKey = '';
+  }
+
+  private async start(): Promise<Page> {
+    if (!this.server) {
       const { createServer } = await import('vite');
-      this.server = await createServer({
+      const server = await createServer({
         root: VIEWER,
         configFile: join(VIEWER, 'vite.config.ts'),
         server: { port: 0, host: '127.0.0.1' },
         logLevel: 'error',
         clearScreen: false,
       });
-      await this.server.listen();
-      const address = this.server.httpServer!.address();
-      const port = typeof address === 'object' && address ? address.port : 5173;
-      const page = await (await getBrowser()).newPage({ viewport: { width: 640, height: 640 } });
-      const errors: string[] = [];
-      page.on('pageerror', (e) => errors.push(e.message));
+      await server.listen();
+      this.server = server;
+    }
+    const address = this.server.httpServer!.address();
+    const port = typeof address === 'object' && address ? address.port : 5173;
+    const page = await (await getBrowser()).newPage({ viewport: { width: 640, height: 640 } });
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('close', () => this.forget(page));
+    page.on('crash', () => {
+      this.forget(page);
+      page.close().catch(() => {});
+    });
+    try {
       await page.goto(`http://127.0.0.1:${port}/?headless=1&bg=dark`);
-      await page.waitForSelector('body[data-ready="true"]', { timeout: 60000 }).catch(() => {
-        throw new Error(`Viewer failed to start: ${errors.join('; ')}`);
-      });
-      this.page = page;
-      return page;
-    })();
-    return this.starting;
+      await page.waitForSelector('body[data-ready="true"]', { timeout: 60000 });
+    } catch (e) {
+      await page.close().catch(() => {});
+      throw new Error(`Viewer failed to start: ${errors.join('; ') || (e as Error).message}`);
+    }
+    this.page = page;
+    return page;
   }
 
   /** Loads a skeleton from memory. `pages` maps each image path in the file to its PNG bytes. */
@@ -133,9 +159,11 @@ export class Previewer {
   }
 
   async close(): Promise<void> {
-    await this.page?.close().catch(() => {});
+    const page = this.page ?? (await this.starting?.catch(() => null));
     this.page = null;
     this.starting = null;
+    this.loadedKey = '';
+    await page?.close().catch(() => {});
     await this.server?.close();
     this.server = null;
   }

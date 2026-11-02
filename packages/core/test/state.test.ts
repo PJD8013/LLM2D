@@ -55,6 +55,13 @@ describe('animation state', () => {
     expect(log).toEqual(['complete spin']);
     expect(e.isComplete).toBe(true);
     close(e.animationTime, 1);
+    // Setting trackTime seeks (a viewer scrubbing the timeline), as in spine.
+    e.trackTime = 0.25;
+    close(e.animationTime, 0.25);
+    expect(e.isComplete).toBe(false);
+    e.trackTime = 1;
+    close(e.animationTime, 1);
+    expect(e.isComplete).toBe(true);
   });
 
   it('fires an event keyed at the end of a looping animation on every loop', () => {

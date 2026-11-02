@@ -73,7 +73,7 @@ const specSchema = z.object({
         bones: z.array(z.string()).optional().describe('Bend with these bones (weighted mesh).'),
         slot: z.string().optional().describe("Put this layer in another layer's slot as alternate art (e.g. eyes_closed -> eyes)."),
         mesh: z.boolean().optional().describe('Force a mesh (true) or a plain quad (false).'),
-        spacing: z.number().positive().optional().describe('Mesh vertex spacing in art pixels (smaller = smoother bends).'),
+        spacing: z.number().min(2).optional().describe('Mesh vertex spacing in art pixels (smaller = smoother bends).'),
         softness: z.number().positive().optional().describe('How far joints blend, in art pixels (bigger = softer).'),
         smooth: z.number().int().min(0).max(10).optional(),
         blend: z.enum(['normal', 'add', 'multiply', 'screen']).optional(),
@@ -99,8 +99,15 @@ const specSchema = z.object({
     )
     .optional(),
   mesh: z
-    .object({ spacing: z.number().optional(), tolerance: z.number().optional(), margin: z.number().optional(), softness: z.number().optional(), smooth: z.number().optional() })
-    .optional(),
+    .object({
+      spacing: z.number().min(2).optional(),
+      tolerance: z.number().min(0).max(20).optional(),
+      margin: z.number().int().min(0).max(32).optional(),
+      softness: z.number().positive().optional(),
+      smooth: z.number().int().min(0).max(10).optional(),
+    })
+    .optional()
+    .describe('Defaults for every mesh (same fields as in parts).'),
   meta: z.record(z.string(), z.unknown()).optional(),
 });
 

@@ -4,10 +4,17 @@ let shared: Promise<Browser> | null = null;
 
 /** One headless Chromium per process, started on first use. WebGL runs on SwiftShader. */
 export function getBrowser(): Promise<Browser> {
-  shared ??= chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }).then((b) => {
-    b.on('disconnected', () => (shared = null));
-    return b;
-  });
+  shared ??= chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }).then(
+    (b) => {
+      b.on('disconnected', () => (shared = null));
+      return b;
+    },
+    (e) => {
+      // Let the next call try again instead of failing forever.
+      shared = null;
+      throw e;
+    },
+  );
   return shared;
 }
 

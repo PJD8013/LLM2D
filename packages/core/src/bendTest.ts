@@ -59,7 +59,8 @@ export interface BendPose {
 /**
  * The poses the bend test uses (also used by the viewer to draw bend sheets):
  * - each bone that bends a mesh at its joint is rotated (IK chains excluded),
- * - each two-bone IK chain is bent by moving its target (crouch) and swung around its root.
+ * - each two-bone IK chain is bent by moving its target (crouch) and swung around its root,
+ * - each one-bone (aim) IK is turned by moving its target around the bone's joint.
  */
 export function bendPoses(data: SkeletonData, options: BendTestOptions = {}): BendPose[] {
   const angles = options.angles ?? [45];
@@ -110,8 +111,50 @@ export function bendPoses(data: SkeletonData, options: BendTestOptions = {}): Be
 
   const sk = new Skeleton(data);
   const world = data.bones.map((b) => sk.boneWorldPosition(b.index));
+  /** A pose that moves an IK target to world (wx, wy). */
+  const moveTarget = (c: (typeof activeIk)[number], pose: string, hard: boolean, list: [number, number][], wx: number, wy: number) => {
+    const [tx, ty] = world[c.target];
+    // World offset -> target bone's parent space (setup pose).
+    const parent = data.bones[c.target].parent;
+    let [lx, ly] = [wx - tx, wy - ty];
+    if (parent >= 0) {
+      const m = sk.world[parent];
+      const det = m[0] * m[3] - m[1] * m[2] || 1;
+      [lx, ly] = [(m[3] * lx - m[2] * ly) / det, (-m[1] * lx + m[0] * ly) / det];
+    }
+    poses.push({
+      control: c.name,
+      pose,
+      hard,
+      meshes: list,
+      apply: (s) => {
+        s.channels[c.target * BONE_CHANNELS + CH_X] += lx;
+        s.channels[c.target * BONE_CHANNELS + CH_Y] += ly;
+      },
+    });
+  };
   for (const c of activeIk) {
-    if (c.bones.length !== 2 || (only && !only.has(c.name))) continue;
+    if (only && !only.has(c.name)) continue;
+    if (c.bones.length === 1) {
+      // Aim: the target circles the bone's joint, which turns the bone like a rotation would.
+      const b = c.bones[0];
+      const list = bending(new Set([...subtree[b], ...subtree[c.target]]));
+      if (!list.length) continue;
+      const [bx, by] = world[b];
+      let [vx, vy] = [world[c.target][0] - bx, world[c.target][1] - by];
+      if (Math.hypot(vx, vy) < 1e-3) {
+        const r = (sk.boneWorldRotation(b) * Math.PI) / 180;
+        [vx, vy] = [Math.cos(r) * (data.bones[b].length || 1), Math.sin(r) * (data.bones[b].length || 1)];
+      }
+      const aimAt = (deg: number, hard: boolean) => {
+        const r = (deg * Math.PI) / 180;
+        moveTarget(c, `aim ${deg > 0 ? '+' : ''}${deg}°`, hard, list, bx + vx * Math.cos(r) - vy * Math.sin(r), by + vx * Math.sin(r) + vy * Math.cos(r));
+      };
+      for (const a of angles) for (const s of [-1, 1]) aimAt(a * s, true);
+      for (const a of stress) for (const s of [-1, 1]) aimAt(a * s, false);
+      continue;
+    }
+    if (c.bones.length !== 2) continue;
     const [p, ch] = c.bones;
     // IK re-solves the chain's rotations, so every mesh the chain or target touches can bend.
     const moved = new Set<number>([...subtree[p], ...subtree[c.target]]);
@@ -120,27 +163,7 @@ export function bendPoses(data: SkeletonData, options: BendTestOptions = {}): Be
     const [tx, ty] = world[c.target];
     const [cx, cy] = world[ch];
     const reach = Math.hypot(cx - px, cy - py) + data.bones[ch].length;
-    const parent = data.bones[c.target].parent;
-    // World offset -> target bone's parent space (setup pose).
-    const toLocal = (dx: number, dy: number): [number, number] => {
-      if (parent < 0) return [dx, dy];
-      const m = sk.world[parent];
-      const det = m[0] * m[3] - m[1] * m[2] || 1;
-      return [(m[3] * dx - m[2] * dy) / det, (-m[1] * dx + m[0] * dy) / det];
-    };
-    const add = (pose: string, hard: boolean, wx: number, wy: number) => {
-      const [lx, ly] = toLocal(wx - tx, wy - ty);
-      poses.push({
-        control: c.name,
-        pose,
-        hard,
-        meshes: list,
-        apply: (s) => {
-          s.channels[c.target * BONE_CHANNELS + CH_X] += lx;
-          s.channels[c.target * BONE_CHANNELS + CH_Y] += ly;
-        },
-      });
-    };
+    const add = (pose: string, hard: boolean, wx: number, wy: number) => moveTarget(c, pose, hard, list, wx, wy);
     const len = Math.hypot(px - tx, py - ty) || 1;
     const crouchAt = (f: number, hard: boolean) =>
       add(`crouch ${Math.round(f * 100)}%`, hard, tx + ((px - tx) / len) * f * reach, ty + ((py - ty) / len) * f * reach);
@@ -162,7 +185,8 @@ export function bendPoses(data: SkeletonData, options: BendTestOptions = {}): Be
  * Exercises a rig the way animation will and checks every weighted mesh for folds (flipped
  * triangles), collapse and overstretch:
  * - each bone that bends a mesh at its joint is rotated (IK chains excluded),
- * - each two-bone IK chain is bent by moving its target (crouch) and swung around its root.
+ * - each two-bone IK chain is bent by moving its target (crouch) and swung around its root,
+ * - each one-bone (aim) IK is turned by moving its target around the bone's joint.
  * IK chains are also checked for reaching their targets at setup.
  */
 export function bendTest(data: SkeletonData, options: BendTestOptions = {}): BendReport {

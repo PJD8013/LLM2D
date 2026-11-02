@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AnimationState,
   EASINGS,
+  bendPoses,
   bendTest,
   Skeleton,
   SkeletonData,
@@ -316,5 +317,28 @@ describe('bend test', () => {
     expect(report.tested.find((t) => t.control === 'arm_ik')?.poses).toEqual(
       expect.arrayContaining(['crouch 20%', 'swing -20°', 'swing +20°']),
     );
+  });
+
+  it('turns one-bone aim IK by moving its target around the joint', () => {
+    const f = armFile();
+    f.ik = [{ name: 'aim', bones: ['lower'], target: 'target', mix: 1 }];
+    delete f.animations.reach;
+    const data = SkeletonData.fromJSON(f);
+    const report = bendTest(data, { stress: [] });
+    expect(report.tested.find((t) => t.control === 'aim')?.poses).toEqual(['aim -45°', 'aim +45°']);
+    expect(report.tested.some((t) => t.control === 'lower')).toBe(false);
+    expect(report.ok).toBe(true);
+    // The pose really turns the bone by that much.
+    const pose = bendPoses(data).find((p) => p.control === 'aim' && p.pose === 'aim +45°')!;
+    const sk = new Skeleton(data);
+    pose.apply(sk);
+    sk.updateWorldTransform();
+    close(sk.boneWorldRotation(data.findBone('lower')), 45, 1e-6);
+    // Weights that tear when the joint turns are caught through the aim too.
+    const strip = f.attachments.strip.strip as any;
+    strip.weights = [[0, 1], [1, 1], [0, 1], [1, 1], [0, 1], [1, 1]];
+    const bad = bendTest(SkeletonData.fromJSON(f), { stress: [] });
+    expect(bad.ok).toBe(false);
+    expect(bad.issues[0]).toMatchObject({ control: 'aim' });
   });
 });
