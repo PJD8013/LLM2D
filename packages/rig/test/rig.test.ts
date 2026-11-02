@@ -277,9 +277,9 @@ describe('buildRig', () => {
     expect(() => buildRig(art(420, 180, [layer('hair', hair)]), far)).toThrow(/Chain "a" \(start \[400, 400\]\) on layer "hair": the start is \d+ px from the art/);
   });
 
-  it('does not let a bone pull on art across a gap in the same layer', () => {
-    // Two legs drawn in one layer, joined at the hips, 12 px apart.
-    const [legR, gap] = [20, 12];
+  it.each([8, 12])('does not let a bone pull on art across a %i px gap in the same layer', (gap) => {
+    // Two legs drawn in one layer, joined at the hips. At 8 px the mesh margins nearly meet.
+    const legR = 20;
     const cxL = 200 - gap / 2 - legR;
     const cxR = 200 + gap / 2 + legR;
     const legs = shape(400, 520, (x, y) =>
@@ -308,7 +308,8 @@ describe('buildRig', () => {
       const [x, y] = [att.vertices[i * 2] + 200, att.vertices[i * 2 + 1] + 500];
       if (y < 160) return;
       let other = 0;
-      for (let k = 0; k < w.length; k += 2) if ((x > 200) === (w[k] === 1 || w[k] === 2)) other += w[k + 1];
+      // Bones 1, 2: left leg; 3, 4: right leg (0 is the hip).
+      for (let k = 0; k < w.length; k += 2) if (x > 200 ? w[k] === 1 || w[k] === 2 : w[k] === 3 || w[k] === 4) other += w[k + 1];
       if (y > 210) far = Math.max(far, other);
       else near = Math.max(near, other);
     });

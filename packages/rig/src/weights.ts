@@ -25,7 +25,10 @@ export interface WeightOptions {
    * legs drawn in one layer); the rest it reaches through the mesh.
    */
   inside?: (x: number, y: number) => boolean;
-  /** Distance from a vertex not checked by `inside` (outline vertices sit a little outside the art). */
+  /**
+   * How far outside the art a vertex can sit (outline vertices do, by the mesh margin). Such a
+   * vertex looks from the nearest point of the art instead.
+   */
   edge?: number;
 }
 
@@ -67,13 +70,25 @@ export function computeWeights(
   const geo = new Float64Array(n * B);
   const sight = options.inside;
   const edge = options.edge ?? 0;
-  const step = Math.max(1e-3, spacing / 8);
+  const step = Math.max(1e-3, Math.min(spacing / 8, edge > 0 ? edge / 3 : Infinity));
+  // Where each vertex looks from: itself when it is on the art, else the nearest point of the
+  // art (an outline vertex beside a narrow gap must not look from the other side of it).
+  const anchor: Pt[] = points.map(([x, y]) => {
+    if (!sight || sight(x, y)) return [x, y];
+    const ring = Math.max(1e-3, edge / 9);
+    for (let r = ring; r <= edge + 1e-9; r += ring)
+      for (let k = 0; k < 24; k++) {
+        const a = (k / 24) * Math.PI * 2;
+        if (sight(x + Math.cos(a) * r, y + Math.sin(a) * r)) return [x + Math.cos(a) * r, y + Math.sin(a) * r];
+      }
+    return [x, y];
+  });
   /** Whether the straight line from vertex v to the bone point stays on the art. */
   const sees = (v: number, px: number, py: number) => {
     if (!sight) return true;
-    const [vx, vy] = points[v];
+    const [vx, vy] = anchor[v];
     const len = Math.hypot(px - vx, py - vy);
-    for (let d = edge; d < len; d += step) {
+    for (let d = 0; d < len; d += step) {
       const f = d / len;
       if (!sight(vx + (px - vx) * f, vy + (py - vy) * f)) return false;
     }
