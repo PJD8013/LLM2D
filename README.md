@@ -31,7 +31,7 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
 
 | 구성 요소 | 위치 | 내용 |
 |---|---|---|
-| 평면 그림 자동 분리 | [`packages/rig`](packages/rig), [`docs/split.md`](docs/split.md) | 레이어 없는 그림 한 장(PNG/JPEG)을 부위별 레이어 PSD로. 배경 제거, 번호 붙은 색 영역, 외곽선은 앞 부위로, 가려진 곳 자동 복원(다시 겹치면 원본과 픽셀 단위로 같음) |
+| 평면 그림 자동 분리 | [`packages/rig`](packages/rig), [`docs/split.md`](docs/split.md) | 레이어 없는 그림 한 장(PNG/JPEG)을 부위별 레이어 PSD로. 배경 제거, 번호 붙은 색 영역, 외곽선은 앞 부위로, 빛 번짐·그림자는 반투명 레이어로, 가려진 곳 자동 복원(다시 겹치면 원본과 픽셀 단위로 같음) |
 | 자동 리깅 | [`packages/rig`](packages/rig), [`docs/rigging.md`](docs/rigging.md) | PSD 읽기 → 알파 윤곽으로 메시 생성 → 중심선 따라 체인 뼈 자동 배치 → 자동 가중치. 관절 좌표만 `rig.json`에 적으면 됨 |
 | 구부림 테스트 | [`packages/core/src/bendTest.ts`](packages/core/src/bendTest.ts) | 관절 회전, IK 웅크리기·흔들기로 메시가 접히거나 찢어지는지 자동 검사 |
 | Claude 연결 (MCP) | [`packages/mcp`](packages/mcp), [`docs/mcp.md`](docs/mcp.md) | Claude가 분리·리깅·애니메이션·렌더 확인·내보내기를 직접 하는 도구 18개. `.mcp.json`으로 Claude Code에 바로 연결 |
@@ -91,7 +91,7 @@ claude
 | 하려는 일 | 명령 |
 |---|---|
 | 샘플 보기 (http://localhost:5173) | `pnpm dev` |
-| 애니메이션 다듬기 (http://localhost:5174) | `pnpm editor [프로젝트 폴더]` |
+| 애니메이션 다듬기 (http://127.0.0.1:5174, 이 컴퓨터에서만) | `pnpm editor [프로젝트 폴더]` |
 | 그림 한 장 → 영역 그림 / 레이어 PSD | `pnpm split regions <그림>` / `pnpm split build <그림> --spec split.json` |
 | PSD 확인 / 리깅 | `pnpm rig inspect <psd> --spec rig.json` / `pnpm rig build <psd> --spec rig.json --out <폴더>` |
 | 프레임·구부림 테스트 이미지 | `pnpm render --file kit/kit.l2d.json --anim cheer` / `pnpm render --file kit/kit.l2d.json --bend` |

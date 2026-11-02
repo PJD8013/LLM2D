@@ -264,6 +264,8 @@ export function validate(input: unknown): ValidationResult {
           anim.events.forEach((e, j) => {
             if (!isObj(e) || !isNum(e.time) || e.time < 0 || !isStr(e.name))
               err(`${ap}.events[${j}]`, 'Event needs a time >= 0 and a name');
+            else if (isNum(anim.duration) && e.time > anim.duration)
+              warn(`${ap}.events[${j}]`, `Event at ${e.time}s is after the duration (${anim.duration}s) and never fires`);
           });
       }
       if (keyCount === 0 && !(Array.isArray(anim.events) && anim.events.length))

@@ -30,6 +30,11 @@ export class TrackEntry {
   delay = 0;
   /** Crossfade length from the previous entry, in seconds. */
   mixDuration = 0;
+  /**
+   * While this entry fades out, its events still fire until the crossfade is this far along
+   * (0..1). Default 0, as in spine: an animation being replaced plays no more sounds.
+   */
+  eventThreshold = 0;
   mixTime = 0;
   mixingFrom: TrackEntry | null = null;
   next: TrackEntry | null = null;
@@ -295,7 +300,8 @@ export class AnimationState {
   private updateMixing(e: TrackEntry, dt: number): void {
     const from = e.mixingFrom;
     if (!from) return;
-    this.advance(from, dt * Math.max(0, from.timeScale));
+    const progress = e.mixDuration > 0 ? e.mixTime / e.mixDuration : 1;
+    this.advance(from, dt * Math.max(0, from.timeScale), progress < from.eventThreshold);
     this.updateMixing(from, dt);
     e.mixTime += dt;
     if (e.mixTime >= e.mixDuration) {
@@ -304,8 +310,8 @@ export class AnimationState {
     }
   }
 
-  /** Moves an entry's clock and queues events/complete for the passed interval. */
-  private advance(e: TrackEntry, d: number): void {
+  /** Moves an entry's clock and queues events (unless `events` is false) and completes for the passed interval. */
+  private advance(e: TrackEntry, d: number, events = true): void {
     const t0 = e.trackTime;
     const t1 = t0 + d;
     e.trackTime = t1;
@@ -315,6 +321,7 @@ export class AnimationState {
     const dur = anim.duration;
     // Events in [lo, hi), or [lo, hi] when the interval runs to the end of the animation.
     const fire = (lo: number, hi: number, inclusiveEnd: boolean) => {
+      if (!events) return;
       for (const ev of anim.events) if (ev.time >= lo && (ev.time < hi || (inclusiveEnd && ev.time === hi))) this.notify('event', e, ev);
     };
     if (dur <= 0) {

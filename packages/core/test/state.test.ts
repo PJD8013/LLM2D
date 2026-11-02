@@ -232,6 +232,27 @@ describe('animation state', () => {
     expect(b.height).toBeGreaterThan(0);
   });
 
+  it('plays no events of an animation that is fading out, unless asked (eventThreshold)', () => {
+    const data = SkeletonData.fromJSON(file({ land: { ...spin, events: [{ time: 0.55, name: 'thud' }] }, idle: spin }));
+    const state = new AnimationState(data);
+    state.defaultMix = 0.2;
+    const log = record(state);
+    const land = state.setAnimation(0, 'land', false);
+    state.update(0.5);
+    state.setAnimation(0, 'idle', true); // just before the thud
+    state.update(0.3);
+    expect(log).not.toContain('event thud');
+
+    const again = state.setAnimation(0, 'land', false);
+    expect(again).not.toBe(land);
+    state.update(0.5);
+    again.eventThreshold = 1;
+    state.setAnimation(0, 'idle', true);
+    state.update(0.3);
+    expect(log.filter((l) => l === 'event thud')).toHaveLength(1);
+    expect(validate(file({ late: { duration: 1, events: [{ time: 1.5, name: 'x' }] } })).warnings.map((w) => w.path)).toContain('animations.late.events[0]');
+  });
+
   it('counts changes for renderers', () => {
     const state = new AnimationState(SkeletonData.fromJSON(file({ spin })));
     const v0 = state.version;

@@ -66,6 +66,12 @@ export class Editor {
   /** Texture URLs of the open project (versioned, so a reload picks up changed images). */
   private textureUrls: string[] = [];
   private textureVersion = 0;
+  /** The latest open() call; an older one finishing later is ignored. */
+  private openToken = 0;
+  /** Counts edits, so a reload that was fetching while the user edited does not discard them. */
+  private edits = 0;
+  /** The skeleton file as last loaded (a change event for identical files is no reload). */
+  private loadedFile = '';
 
   // ---------------- Loading ----------------
 
@@ -79,11 +85,22 @@ export class Editor {
 
   /** Opens a project (or reloads the open one, keeping animation, time and selection). */
   async open(id: string, keep = false): Promise<void> {
+    const token = ++this.openToken;
+    const edits = this.edits;
     this.loading = true;
     try {
       const res = await fetch(`/api/project?id=${encodeURIComponent(id)}`);
       const body = await res.json();
+      if (token !== this.openToken) return;
       if (!res.ok) throw new Error(body.error ?? res.statusText);
+      const reloading = keep && this.info?.id === id;
+      const text = JSON.stringify(body.file);
+      if (reloading && text === this.loadedFile) return; // nothing new on disk
+      if (reloading && this.edits !== edits) {
+        // Edited while the files were being read: keep the edits, offer the reload instead.
+        this.externalChange = true;
+        return;
+      }
       const file = body.file as L2DFile;
       const data = SkeletonData.fromJSON(file);
       // Versioned URLs: Pixi caches textures by URL, and a reload may bring changed images.
@@ -94,7 +111,13 @@ export class Editor {
         urls.push(src);
         return Assets.load<Texture>(src);
       });
-      const sameProject = keep && this.info?.id === id;
+      if (token !== this.openToken || (reloading && this.edits !== edits)) {
+        void Assets.unload(urls).catch(() => {});
+        if (token === this.openToken) this.externalChange = true;
+        return;
+      }
+      this.loadedFile = text;
+      const sameProject = reloading;
       this.data = data;
       this.loaded = { data, textures };
       this.info = body.info;
@@ -131,9 +154,9 @@ export class Editor {
       this.pose();
       this.say(keep ? 'info' : null, keep ? '파일이 밖에서 바뀌어 다시 불러왔습니다.' : '');
     } catch (e) {
-      this.say('error', `불러오기 실패: ${(e as Error).message}`);
+      if (token === this.openToken) this.say('error', `불러오기 실패: ${(e as Error).message}`);
     } finally {
-      this.loading = false;
+      if (token === this.openToken) this.loading = false;
     }
   }
 
@@ -250,6 +273,7 @@ export class Editor {
   }
 
   private commit() {
+    this.edits++;
     M.prune(this.anim);
     this.data!.setAnimation(this.animName, this.anim);
     this.updateUndo();
@@ -460,6 +484,7 @@ export class Editor {
     if (!/^[A-Za-z0-9_-]+$/.test(name)) return this.say('error', '이름은 영문, 숫자, _, - 만 쓸 수 있습니다.');
     if (this.data.source.animations[name]) return this.say('error', `"${name}" 애니메이션이 이미 있습니다.`);
     if (record) this.history.push(this.historyState());
+    if (record) this.edits++;
     this.data.setAnimation(name, { duration: 1 });
     this.refreshNames();
     this.updateUndo();
@@ -471,6 +496,7 @@ export class Editor {
     if (this.data.source.animations[name]) return this.say('error', `"${name}" 애니메이션이 이미 있습니다.`);
     if (!/^[A-Za-z0-9_-]+$/.test(name)) return this.say('error', '이름은 영문, 숫자, _, - 만 쓸 수 있습니다.');
     this.history.push(this.historyState());
+    this.edits++;
     this.data.setAnimation(name, structuredClone(this.anim));
     this.refreshNames();
     this.updateUndo();
@@ -482,6 +508,7 @@ export class Editor {
     if (!/^[A-Za-z0-9_-]+$/.test(name)) return this.say('error', '이름은 영문, 숫자, _, - 만 쓸 수 있습니다.');
     if (this.data.source.animations[name]) return this.say('error', `"${name}" 애니메이션이 이미 있습니다.`);
     this.history.push(this.historyState());
+    this.edits++;
     const anim = this.anim;
     this.data.removeAnimation(this.animName);
     this.data.setAnimation(name, anim);
@@ -493,6 +520,7 @@ export class Editor {
   deleteAnimation() {
     if (!this.data || !this.animName) return;
     this.history.push(this.historyState());
+    this.edits++;
     this.data.removeAnimation(this.animName);
     this.refreshNames();
     if (!this.animNames.length) this.data.setAnimation('idle', { duration: 1 }), this.refreshNames();
@@ -503,6 +531,7 @@ export class Editor {
   // ---------------- Undo / save ----------------
 
   private restore(state: string) {
+    this.edits++;
     const cut = state.indexOf('\n');
     const shown = state.slice(0, cut);
     const all = JSON.parse(state.slice(cut + 1)) as Record<string, L2DAnimation>;
