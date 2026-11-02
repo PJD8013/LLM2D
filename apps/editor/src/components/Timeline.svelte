@@ -240,7 +240,7 @@
 
   type Drag =
     | { kind: 'scrub' }
-    | { kind: 'keys'; x0: number; start: M.KeyRef[]; started: boolean }
+    | { kind: 'keys'; x0: number; start: M.KeyRef[]; started: boolean; anchor: number }
     | { kind: 'box'; additive: boolean; moved: boolean };
   let drag: Drag | null = null;
 
@@ -287,13 +287,13 @@
     if (hit) {
       const ids = new Set(editor.selectedKeys.map(M.keyId));
       const already = hit.refs.every((r) => ids.has(M.keyId(r)));
-      if (e.shiftKey) editor.selectedKeys = already ? editor.selectedKeys.filter((k) => !hit.refs.some((r) => M.keyId(r) === M.keyId(k))) : [...editor.selectedKeys, ...hit.refs];
+      if (e.shiftKey) editor.selectedKeys = already ? editor.selectedKeys.filter((k) => !hit.refs.some((r) => M.keyId(r) === M.keyId(k))) : M.uniqueRefs([...editor.selectedKeys, ...hit.refs]);
       else if (!already) editor.selectedKeys = hit.refs;
       if (hit.row.kind === 'bone' || hit.row.tracks[0]?.group === 'bones') editor.selectBone(hit.row.target);
       else if (hit.row.kind === 'slot' || hit.row.tracks[0]?.group === 'slots') editor.selectSlot(hit.row.target);
       editor.playing = false;
       editor.seek(hit.refs[0].time, false);
-      drag = { kind: 'keys', x0: p.x, start: [...editor.selectedKeys], started: false };
+      drag = { kind: 'keys', x0: p.x, start: [...editor.selectedKeys], started: false, anchor: hit.refs[0].time };
       return;
     }
     drag = { kind: 'box', additive: e.shiftKey, moved: false };
@@ -310,7 +310,8 @@
         drag.started = true;
         editor.beginDrag();
       }
-      const dt = M.snap(Math.abs((p.x - drag.x0) / pps), editor.fps) * Math.sign(p.x - drag.x0);
+      // The key under the pointer lands on a frame; the others keep their distance to it.
+      const dt = M.snap(drag.anchor + (p.x - drag.x0) / pps, editor.fps) - drag.anchor;
       editor.dragKeys(drag.start, dt);
       if (editor.selectedKeys[0]) editor.seek(editor.selectedKeys[0].time, false);
     } else if (drag.kind === 'box' && boxSel) {

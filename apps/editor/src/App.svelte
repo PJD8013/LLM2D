@@ -41,17 +41,30 @@
     return v ? v.trim() : null;
   }
 
+  const TEXT_INPUTS = new Set(['text', 'number', 'search', 'email', 'url', 'password', 'tel']);
+  /** Keys a focused control uses itself (arrows in a list or slider). */
+  const NATIVE_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end', 'pageup', 'pagedown']);
+
   function keydown(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
-    // Save works everywhere; other shortcuts leave text fields alone.
+    const el = e.target as HTMLElement;
+    // Save works everywhere; other shortcuts leave text entry alone.
     if (mod && k === 's') {
       e.preventDefault();
-      (e.target as HTMLElement).blur?.();
+      el.blur?.();
       void editor.save();
       return;
     }
-    if ((e.target as HTMLElement).closest('input, select, textarea')) return;
+    const typing = el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && TEXT_INPUTS.has((el as HTMLInputElement).type));
+    if (typing) return;
+    const list = el.tagName === 'SELECT' || (el.tagName === 'INPUT' && (el as HTMLInputElement).type === 'range');
+    if (list && !mod && NATIVE_KEYS.has(k)) return;
+    if (handle(e, mod, k)) e.preventDefault(); // e.g. Space plays instead of pressing the focused button
+  }
+
+  /** Runs the shortcut for a key; false when the key is not one. */
+  function handle(e: KeyboardEvent, mod: boolean, k: string): boolean {
     if (mod && k === 'z') {
       e.preventDefault();
       e.shiftKey ? editor.redo() : editor.undo();
@@ -60,14 +73,12 @@
       editor.redo();
     } else if (mod && k === 'c') editor.copy();
     else if (mod && k === 'v') editor.paste();
-    else if (mod) return;
-    else if (k === ' ') {
-      e.preventDefault();
-      editor.playing = !editor.playing;
-    } else if (k === 'arrowleft') editor.step(e.shiftKey ? -10 : -1);
+    else if (mod) return false;
+    else if (k === ' ') editor.playing = !editor.playing;
+    else if (k === 'arrowleft') editor.step(e.shiftKey ? -10 : -1);
     else if (k === 'arrowright') editor.step(e.shiftKey ? 10 : 1);
     else if (k === 'home') editor.seek(0);
-    else if (k === 'end') editor.seek(editor.duration);
+    else if (k === 'end') editor.seek(editor.duration, false);
     else if (k === 'r') editor.tool = 'rotate';
     else if (k === 't' || k === 'w') editor.tool = 'translate';
     else if (k === 's') editor.tool = 'scale';
@@ -77,7 +88,8 @@
     else if (k === 'f') editor.stage?.resetView(), timeline?.fitAll();
     else if (k === 'escape') (editor.selectedKeys = []), editor.selectBone(null);
     else if (k === '?') help = !help;
-    else return;
+    else return false;
+    return true;
   }
 </script>
 
@@ -141,7 +153,7 @@
       <button type="button" onclick={() => editor.step(-1)} title="이전 프레임 (←)">◀</button>
       <button type="button" class="play" onclick={() => (editor.playing = !editor.playing)} title="재생/정지 (Space)" data-testid="play">{editor.playing ? '⏸' : '▶'}</button>
       <button type="button" onclick={() => editor.step(1)} title="다음 프레임 (→)">▶|</button>
-      <button type="button" onclick={() => editor.seek(editor.duration)} title="끝 (End)">⏭</button>
+      <button type="button" onclick={() => editor.seek(editor.duration, false)} title="끝 (End)">⏭</button>
       <span class="time" data-testid="time">{editor.time.toFixed(2)} / {editor.duration.toFixed(2)}s</span>
       <label><input type="checkbox" bind:checked={editor.loop} /> 반복</label>
       <label>속도 <select bind:value={editor.speed}>{#each [0.25, 0.5, 1, 1.5, 2] as s (s)}<option value={s}>{s}x</option>{/each}</select></label>

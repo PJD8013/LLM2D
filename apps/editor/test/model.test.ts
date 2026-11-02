@@ -92,6 +92,19 @@ describe('editing model', () => {
     expect(a.events!.map((e) => e.time)).toEqual([0.75, 0.75]);
   });
 
+  it('moves events that share a time once, and pastes keys whole (curve included)', () => {
+    const a: L2DAnimation = {};
+    const ev: Track = { group: 'events', target: '', channel: 'events' };
+    setKey(a, ev, { time: 0.5, name: 'land' });
+    setKey(a, ev, { time: 0.5, name: 'sfx' });
+    const moved = moveKeys(a, [ref(ev, 0.5), ref(ev, 0.5)], 0.25);
+    expect(moved).toEqual([ref(ev, 0.75)]);
+    expect(copyKeys(a, [...moved, ...moved])!.items).toHaveLength(2);
+    setKey(a, rot, { time: 1, value: 1, curve: 'easeOutBack' });
+    pasteKeys(a, { items: [{ track: rot, key: { time: 0, value: 5 } }] }, 1);
+    expect(getKey(a, ref(rot, 1))).toEqual({ time: 1, value: 5 });
+  });
+
   it('copies and pastes keys relative to the earliest one', () => {
     const a: L2DAnimation = {};
     setKey(a, rot, { time: 0.2, value: 1, curve: 'easeInSine' });
@@ -151,5 +164,8 @@ describe('editing model', () => {
     expect(h.redo('a')).toBe('b');
     h.push('x');
     expect(h.canRedo).toBe(false);
+    h.push('y');
+    h.dropLast();
+    expect(h.undo('z')).toBe('x');
   });
 });

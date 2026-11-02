@@ -11,10 +11,12 @@
     void editor.poseRev;
     const name = editor.selectedBone;
     const sk = editor.stage?.skeleton;
-    if (!name || !sk || !editor.data) return null;
+    if (!name || !sk || !editor.data || !editor.animName || editor.data.findBone(name) < 0) return null;
     const b = editor.data.bones[editor.data.findBone(name)];
-    const time = M.snap(editor.time, editor.fps);
-    const keyed = (channel: M.BoneChannel) => !!M.getKey(editor.anim, { group: 'bones', target: name, channel, time });
+    const keyed = (channel: M.BoneChannel) => {
+      const track: M.Track = { group: 'bones', target: name, channel };
+      return !!M.getKey(editor.anim, { ...track, time: editor.keyTime(track) });
+    };
     const ik = editor.data.ik.find((c) => c.bones.includes(b.index) && sk.channels[editor.data!.ikChannelBase + c.index] > 0);
     return {
       name,
@@ -31,6 +33,7 @@
     const sk = editor.stage?.skeleton;
     if (!name || !sk || !editor.data) return null;
     const s = editor.data.findSlot(name);
+    if (s < 0) return null;
     const o = editor.data.slotChannelBase + s * SLOT_CHANNELS;
     const c = sk.channels;
     const hex = (v: number) =>
@@ -77,8 +80,8 @@
 
   function toggleKey(channel: M.BoneChannel) {
     if (!bone) return;
-    const time = M.snap(editor.time, editor.fps);
-    const ref = { group: 'bones', target: bone.name, channel, time } as M.KeyRef;
+    const track: M.Track = { group: 'bones', target: bone.name, channel };
+    const ref = { ...track, time: editor.keyTime(track) } as M.KeyRef;
     if (bone.keyed[channel]) editor.edit((anim) => M.deleteKeys(anim, [ref]));
     else editor.keySelected([channel]);
   }
@@ -208,7 +211,13 @@
       {/if}
       {#if curves.length}
         <h3>다음 키까지의 곡선</h3>
-        <CurveEditor curve={sameCurve ? curves[0] : undefined} mixed={!sameCurve} onchange={(c: L2DCurve | undefined) => editor.setCurve(c)} />
+        <CurveEditor
+          curve={sameCurve ? curves[0] : undefined}
+          mixed={!sameCurve}
+          onchange={(c: L2DCurve | undefined, live?: boolean) => editor.setCurve(c, live)}
+          onbegin={() => editor.beginDrag()}
+          onend={() => editor.endDrag()}
+        />
       {/if}
       <button type="button" class="danger" onclick={() => editor.deleteSelectedKeys()}>선택한 키 지우기 (Delete)</button>
     </section>
