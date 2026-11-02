@@ -2,7 +2,6 @@ import Constrainautor from '@kninnug/constrainautor';
 import Delaunator from 'delaunator';
 import { components, traceBoundary } from './contour.ts';
 import {
-  convexHull,
   distToPolygon,
   pointInPolygon,
   signedArea,
@@ -24,13 +23,14 @@ export interface MeshOptions {
 }
 
 export interface MeshResult {
-  /** Image-local pixel coordinates, hull first. */
+  /** Image-local pixel coordinates, outline points first. */
   points: Pt[];
   triangles: number[];
+  /** Number of outline points at the start of `points` (all pieces). */
   hull: number;
   spacing: number;
-  /** Outline polygon used (image pixels). */
-  outline: Pt[];
+  /** One outline polygon per separate piece of the art, largest first (image pixels). */
+  outlines: Pt[][];
   warnings: string[];
 }
 
@@ -57,31 +57,36 @@ export function buildMesh(img: RGBAImage, options: MeshOptions = {}, extra: Pt[]
 
   const mask = dilate(alphaMask(img, threshold), w, h, margin);
   const { labels, list } = components(mask, w, h);
-  if (!list.length) throw new Error('Image is empty');
-  const total = list.reduce((s, c) => s + c.size, 0);
-  let outline: Pt[];
-  if (list.length > 1 && list.slice(1).some((c) => c.size > total * 0.02)) {
-    warnings.push(`art has ${list.length} separate pieces; using their convex hull as the mesh outline`);
-    const pts: Pt[] = [];
-    for (let i = 0; i < mask.length; i++) if (mask[i]) pts.push([i % w, Math.floor(i / w)]);
-    outline = convexHull(pts);
-  } else {
-    outline = traceBoundary(labels, w, h, list[0]);
+  if (!list.length) throw new Error('the layer has no visible pixels');
+  // Every piece gets its own outline, so a detached dot or a second strand stays in the mesh
+  // (and pieces are not joined across the gap between them).
+  const loops: Pt[][] = [];
+  let lost = 0;
+  for (const c of list) {
+    const raw = traceBoundary(labels, w, h, c);
+    let loop = simplifyClosed(raw, tolerance);
+    if (loop.length < 3) loop = raw;
+    if (loop.length < 3 || Math.abs(signedArea(loop)) < 1) {
+      lost += c.size;
+      continue;
+    }
+    if (signedArea(loop) < 0) loop.reverse();
+    // Keep UVs inside the image.
+    loops.push(subdivideClosed(loop, spacing).map(([x, y]) => [Math.min(w, Math.max(0, x)), Math.min(h, Math.max(0, y))] as Pt));
   }
-  outline = simplifyClosed(outline, tolerance);
-  if (signedArea(outline) < 0) outline.reverse();
-  outline = subdivideClosed(outline, spacing);
-  // Keep UVs inside the image.
-  outline = outline.map(([x, y]) => [Math.min(w, Math.max(0, x)), Math.min(h, Math.max(0, y))]);
+  if (!loops.length) throw new Error('the layer has no visible pixels');
+  if (lost) warnings.push(`${lost} px of specks too small for the mesh were left out`);
+  const inside = (x: number, y: number) => loops.some((l) => pointInPolygon(x, y, l));
+  const edgeDist = (x: number, y: number) => Math.min(...loops.map((l) => distToPolygon(x, y, l)));
 
-  const points: Pt[] = outline.map((p) => [p[0], p[1]]);
+  const points: Pt[] = loops.flat().map((p) => [p[0], p[1]]);
   const hull = points.length;
   const minGap = spacing * 0.45;
   const farFromAll = (x: number, y: number) => points.every((p) => (p[0] - x) ** 2 + (p[1] - y) ** 2 >= minGap * minGap);
   const tryAdd = (x: number, y: number, edgeGap: number) => {
     if (x < 0 || y < 0 || x > w || y > h) return;
-    if (!pointInPolygon(x, y, outline)) return;
-    if (distToPolygon(x, y, outline) < edgeGap) return;
+    if (!inside(x, y)) return;
+    if (edgeDist(x, y) < edgeGap) return;
     if (!farFromAll(x, y)) return;
     points.push([x, y]);
   };
@@ -93,7 +98,11 @@ export function buildMesh(img: RGBAImage, options: MeshOptions = {}, extra: Pt[]
 
   const del = Delaunator.from(points);
   const edges: [number, number][] = [];
-  for (let i = 0; i < hull; i++) edges.push([i, (i + 1) % hull]);
+  let offset = 0;
+  for (const loop of loops) {
+    for (let i = 0; i < loop.length; i++) edges.push([offset + i, offset + ((i + 1) % loop.length)]);
+    offset += loop.length;
+  }
   try {
     new Constrainautor(del, edges);
   } catch (e) {
@@ -105,7 +114,7 @@ export function buildMesh(img: RGBAImage, options: MeshOptions = {}, extra: Pt[]
     const [a, b, c] = [t[i], t[i + 1], t[i + 2]];
     const cx = (points[a][0] + points[b][0] + points[c][0]) / 3;
     const cy = (points[a][1] + points[b][1] + points[c][1]) / 3;
-    if (!pointInPolygon(cx, cy, outline)) continue;
+    if (!inside(cx, cy)) continue;
     const area = (points[b][0] - points[a][0]) * (points[c][1] - points[a][1]) - (points[c][0] - points[a][0]) * (points[b][1] - points[a][1]);
     if (Math.abs(area) < 1e-6) continue;
     triangles.push(a, b, c);
@@ -128,7 +137,7 @@ export function buildMesh(img: RGBAImage, options: MeshOptions = {}, extra: Pt[]
     triangles: triangles.map((i) => remap[i]),
     hull,
     spacing,
-    outline,
+    outlines: loops,
     warnings,
   };
 }

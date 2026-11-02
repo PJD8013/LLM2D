@@ -19,6 +19,14 @@ export interface WeightOptions {
   smooth?: number;
   /** Max bones per vertex. Default 4. */
   maxInfluences?: number;
+  /**
+   * Whether a point (vertex space) is on the art. With it, a bone takes as seeds only vertices
+   * it can see in a straight line over the art, so it does not pull on art across a gap (two
+   * legs drawn in one layer); the rest it reaches through the mesh.
+   */
+  inside?: (x: number, y: number) => boolean;
+  /** Distance from a vertex not checked by `inside` (outline vertices sit a little outside the art). */
+  edge?: number;
 }
 
 /**
@@ -57,15 +65,39 @@ export function computeWeights(
     }
 
   const geo = new Float64Array(n * B);
+  const sight = options.inside;
+  const edge = options.edge ?? 0;
+  const step = Math.max(1e-3, spacing / 8);
+  /** Whether the straight line from vertex v to the bone point stays on the art. */
+  const sees = (v: number, px: number, py: number) => {
+    if (!sight) return true;
+    const [vx, vy] = points[v];
+    const len = Math.hypot(px - vx, py - vy);
+    for (let d = edge; d < len; d += step) {
+      const f = d / len;
+      if (!sight(vx + (px - vx) * f, vy + (py - vy) * f)) return false;
+    }
+    return true;
+  };
   for (let b = 0; b < B; b++) {
     const s = bones[b];
-    const euclid = points.map(([x, y]) => distToSegment(x, y, s.x1, s.y1, s.x2, s.y2).d);
-    // Seeds: vertices close to the bone in a straight line. Everything else is reached
-    // through the mesh.
+    const near = points.map(([x, y]) => distToSegment(x, y, s.x1, s.y1, s.x2, s.y2));
+    const euclid = near.map((e) => e.d);
+    // Seeds: vertices close to the bone in a straight line over the art. Everything else is
+    // reached through the mesh.
     const minD = Math.min(...euclid);
     const seedR = Math.max(spacing * 1.2, minD + spacing * 0.5);
     const dist = new Float64Array(n).fill(Infinity);
-    for (let v = 0; v < n; v++) if (euclid[v] <= seedR) dist[v] = euclid[v];
+    let seeded = false;
+    for (let v = 0; v < n; v++) {
+      if (euclid[v] > seedR) continue;
+      const t = near[v].t;
+      if (!sees(v, s.x1 + (s.x2 - s.x1) * t, s.y1 + (s.y2 - s.y1) * t)) continue;
+      dist[v] = euclid[v];
+      seeded = true;
+    }
+    // A bone off the art sees nothing: its nearest vertices, then.
+    if (!seeded) for (let v = 0; v < n; v++) if (euclid[v] <= minD + spacing * 0.5) dist[v] = euclid[v];
     dijkstra(dist, adj);
     for (let v = 0; v < n; v++) geo[v * B + b] = Number.isFinite(dist[v]) ? dist[v] : euclid[v] * 4;
   }

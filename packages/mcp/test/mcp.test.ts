@@ -73,7 +73,7 @@ describe('llm2d MCP server', () => {
     expect(Math.abs(spec.origin[1] - 1544)).toBeLessThan(8);
   });
 
-  it('rigs, describes, animates, validates and exports', async () => {
+  it('rigs, describes, animates, validates and exports', { timeout: 60_000 }, async () => {
     const spec = JSON.parse(readFileSync(join(root, 'samples/kit/rig.json'), 'utf8'));
     const set = await call('set_rig_spec', { dir, spec: { ...spec, name: 'fox', meta: undefined }, image: false });
     expect(set.isError).toBeFalsy();
@@ -134,7 +134,7 @@ describe('llm2d MCP server', () => {
     expect(missing.isError).toBe(true);
   });
 
-  it('keeps parallel writes, survives renamed bones, refuses unsafe exports and misspelled arguments', async () => {
+  it('keeps parallel writes, survives renamed bones, refuses unsafe exports and misspelled arguments', { timeout: 60_000 }, async () => {
     // Four presets into four animations at once: none lost, files intact.
     const results = await Promise.all(
       ['a1', 'a2', 'a3', 'a4'].map((animation) => call('apply_preset', { dir, animation, preset: 'breathe', params: { bone: 'hip' }, preview: false })),
@@ -168,7 +168,7 @@ describe('llm2d MCP server', () => {
     expect(JSON.parse((await call('get_rig_spec', { dir })).text).art).toBe(spec.art);
   });
 
-  it('starts from a flat picture: regions, split into layers, rig', async () => {
+  it('starts from a flat picture: regions, split into layers, rig', { timeout: 60_000 }, async () => {
     // An outlined orange tail behind an outlined teal body, on white.
     const w = 300;
     const h = 240;

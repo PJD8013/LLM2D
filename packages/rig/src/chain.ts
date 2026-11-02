@@ -48,11 +48,33 @@ export function thin(mask: Uint8Array, w: number, h: number): Uint8Array {
 export function chainJoints(img: RGBAImage, count: number, start: Pt, end?: Pt, threshold = 8): Pt[] {
   const { width: w, height: h } = img;
   const mask = alphaMask(img, threshold);
-  // Keep the largest piece only.
   const { labels, list } = components(mask, w, h);
-  if (!list.length) throw new Error('Image is empty');
-  for (let i = 0; i < mask.length; i++) mask[i] = labels[i] === list[0].label ? 1 : 0;
+  if (!list.length) throw new Error('the layer has no visible pixels');
+  // Follow the piece the chain starts on (a layer may hold several strands of hair): the one
+  // under `start`, else the nearest one. A start far from all of them is a mistake.
+  let piece = 0;
+  let gap = Infinity;
+  const sx = Math.round(start[0]);
+  const sy = Math.round(start[1]);
+  if (sx >= 0 && sy >= 0 && sx < w && sy < h && labels[sy * w + sx]) {
+    piece = labels[sy * w + sx];
+    gap = 0;
+  } else
+    for (let i = 0; i < labels.length; i++) {
+      if (!labels[i]) continue;
+      const d = Math.hypot((i % w) - start[0], Math.floor(i / w) - start[1]);
+      if (d < gap) {
+        gap = d;
+        piece = labels[i];
+      }
+    }
+  for (let i = 0; i < mask.length; i++) mask[i] = labels[i] === piece ? 1 : 0;
   const dt = distanceTransform(mask, w, h);
+  let radius = 0;
+  for (const v of dt) radius = Math.max(radius, v);
+  const reach = Math.max(16, radius * 2);
+  if (gap > reach)
+    throw new Error(`the start is ${Math.round(gap)} px from the art (at most ${Math.round(reach)}); put it on or next to the art, where the chain is rooted`);
   const skel = thin(mask, w, h);
 
   const nodes: number[] = [];
