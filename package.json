@@ -9,9 +9,10 @@
   },
   "scripts": {
     "dev": "pnpm --filter @llm2d/viewer dev",
+    "editor": "node scripts/editor.ts",
     "build:viewer": "pnpm --filter @llm2d/viewer build",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @llm2d/svelte --filter @llm2d/reel-demo check",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @llm2d/svelte --filter @llm2d/reel-demo --filter @llm2d/editor check",
     "samples": "node scripts/build-samples.ts",
     "validate": "node scripts/validate.ts",
     "render": "node scripts/render.ts",

@@ -9,13 +9,14 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
                  (2단계)        (3단계, MCP)            (1단계: 포맷·런타임)       (4단계)
 ```
 
-## 현재 상태: 4단계 완료 + 실제 Stake 게임 적용 + 그림 한 장 자동 분리
+## 현재 상태: 4단계 완료 + 실제 Stake 게임 적용 + 그림 한 장 자동 분리 + 타임라인 편집기
 
 | 구성 요소 | 위치 | 내용 |
 |---|---|---|
 | 포맷 v0.1 | [`docs/format.md`](docs/format.md) | 뼈, 슬롯, region/mesh 첨부물, 가중치, IK, 애니메이션, 이벤트 |
 | 코어 엔진 | [`packages/core`](packages/core) | 검증기, 뼈 계산, 2본 IK, 메시 스키닝, 커브 30여 종, 트랙·전환·대기열·이벤트. DOM 의존 없음 |
 | PixiJS 8 런타임 | [`packages/pixi`](packages/pixi) | `Llm2dActor`. API를 spine-pixi-v8과 맞춤(`actor.state.setAnimation(0, 'win', true)`) |
+| 타임라인 편집기 | [`apps/editor`](apps/editor), [`docs/editor.md`](docs/editor.md) | 뼈를 잡아 돌리고 옮겨 키 넣기, 키 이동·복사·곡선(베지어) 편집, 슬롯·이벤트, 어니언 스킨, 실행 취소, MCP와 같은 `animations.json`에 저장. Claude가 고치면 자동으로 다시 불러옴 |
 | 뷰어 | [`apps/viewer`](apps/viewer) | 애니메이션 재생, 속도, 전환 시간, 타임라인, 뼈/메시/IK 표시, 파일 끌어다 놓기 |
 | 자동 리깅 | [`packages/rig`](packages/rig), [`docs/rigging.md`](docs/rigging.md) | PSD 읽기 → 알파 윤곽으로 메시 생성 → 중심선 따라 체인 뼈 자동 배치 → 자동 가중치. 관절 좌표만 `rig.json`에 적으면 됨 |
 | 평면 그림 자동 분리 | [`packages/rig`](packages/rig), [`docs/split.md`](docs/split.md) | 레이어 없는 그림 한 장(PNG/JPEG)을 부위별 레이어 PSD로. 배경 제거, 번호 붙은 색 영역, 외곽선은 앞 부위로, 가려진 곳 자동 복원(다시 겹치면 원본과 픽셀 단위로 같음) |
@@ -40,6 +41,10 @@ pnpm install
 
 ```bash
 pnpm dev                 # 뷰어 실행 (http://localhost:5173)
+```
+
+```bash
+pnpm editor              # 타임라인 편집기 (http://localhost:5174)
 ```
 
 ```bash
@@ -102,7 +107,7 @@ pnpm pack:lib            # Stake 게임에 설치할 tgz 만들기 (out/packages
 pnpm stake:lines apply ../web-sdk   # Stake web-sdk의 lines 게임에 동전 심볼 붙이기
 ```
 
-자동 리깅 사용법은 [`docs/rigging.md`](docs/rigging.md), 그림 한 장 자동 분리는 [`docs/split.md`](docs/split.md), Claude 연결은 [`docs/mcp.md`](docs/mcp.md),
+자동 리깅 사용법은 [`docs/rigging.md`](docs/rigging.md), 그림 한 장 자동 분리는 [`docs/split.md`](docs/split.md), Claude 연결은 [`docs/mcp.md`](docs/mcp.md), 편집기는 [`docs/editor.md`](docs/editor.md),
 Stake 게임 연동은 [`docs/stake.md`](docs/stake.md), 실제 Stake 게임에 붙인 예는
 [`examples/stake-lines`](examples/stake-lines)에 있습니다.
 
@@ -142,7 +147,7 @@ Stake 웹 SDK(pixi-svelte)에서는 Spine 컴포넌트와 같은 모양의 `Llm2
 4. ~~Stake 연동: 텍스처 아틀라스, pixi-svelte 컴포넌트, 릴 데모, 설치용 패키지~~ ✅
 5. ~~실제 Stake 게임 저장소에 붙여 보기: web-sdk `lines` 게임의 H1 심볼 교체~~ ✅
 6. ~~평면 그림 한 장 자동 분리: 영역 나누기, 부위 묶기, 가려진 곳 복원, MCP 도구~~ ✅
-7. (선택) 타임라인 편집 화면
+7. ~~타임라인 편집 화면: 뼈 직접 조작, 키·곡선 편집, Claude와 같은 파일로 번갈아 작업~~ ✅
 
 ## 설계 메모
 

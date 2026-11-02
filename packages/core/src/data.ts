@@ -304,6 +304,24 @@ export class SkeletonData {
     this.bounds = file.bounds ?? this.computeSetupBounds();
   }
 
+  /**
+   * Compiles `anim` and stores it under `name`, replacing an animation of that name (in
+   * `animations` and in `source`). For editors: the animation must be valid for this skeleton
+   * (check with validate()); playing tracks keep the old copy until set again.
+   */
+  setAnimation(name: string, anim: L2DAnimation): AnimationData {
+    const compiled = this.compileAnimation(name, anim);
+    this.animations.set(name, compiled);
+    this.source.animations[name] = anim;
+    return compiled;
+  }
+
+  /** Removes an animation (from `animations` and `source`). */
+  removeAnimation(name: string): void {
+    this.animations.delete(name);
+    delete this.source.animations[name];
+  }
+
   findBone(name: string): number {
     return this.boneByName.get(name) ?? -1;
   }

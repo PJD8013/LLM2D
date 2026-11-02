@@ -166,6 +166,26 @@ describe('animation', () => {
     close(rot(), 45);
   });
 
+  it('recompiles or removes one animation (for editors)', () => {
+    const data = SkeletonData.fromJSON(armFile());
+    const sk = new Skeleton(data);
+    const state = new AnimationState(data);
+    const rot = () => sk.channels[data.boneChannel(data.findBone('upper'), 0)];
+    const swing = data.setAnimation('swing', { bones: { upper: { rotate: [{ time: 0, value: 10 }, { time: 1, value: 30 }] } } });
+    expect(data.animations.get('swing')).toBe(swing);
+    expect(swing.duration).toBe(1);
+    expect(data.source.animations.swing.bones?.upper.rotate).toHaveLength(2);
+    state.setAnimation(0, 'swing', false);
+    state.update(0.5);
+    state.apply(sk);
+    close(rot(), 20);
+    data.setAnimation('wave', { duration: 2, events: [{ time: 1, name: 'hi' }] });
+    expect(data.animations.get('wave')!.duration).toBe(2);
+    data.removeAnimation('wave');
+    expect(data.animations.has('wave')).toBe(false);
+    expect(data.source.animations.wave).toBeUndefined();
+  });
+
   it('multiplies scale, sets color and switches attachments', () => {
     const data = SkeletonData.fromJSON(armFile());
     const sk = new Skeleton(data);

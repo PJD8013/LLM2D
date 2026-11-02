@@ -24,6 +24,11 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
   not rewrite `.ts`.
 - `packages/mcp` — stdio MCP server (`src/server.ts`, tools in `src/tools.ts`, project folders in
   `src/project.ts`). Registered for Claude Code in `.mcp.json`. Server `INSTRUCTIONS` describe the workflow.
+- `apps/editor` — Svelte 5 timeline editor (`pnpm editor [dir]`, port 5174). `server.ts` is a Vite plugin API
+  (`/api/projects`, `/api/project`, PUT `/api/project/animations` via the MCP `Project`, `/files/<encoded id>/...`,
+  `llm2d:changed` HMR event on outside edits). `src/lib/model.ts` (pure key ops, rows, history; unit-tested),
+  `editor.svelte.ts` (state, undo, save; edits recompile one animation with `SkeletonData.setAnimation`),
+  `stage.ts` (Pixi view, bone picking, rotate/move/scale drags). `test/editor.e2e.test.ts` drives it in Chromium.
 - `apps/viewer` — Vite viewer; also exposes `window.__llm2d` (`loadData`, `seek`, `frame`, `contactSheet`,
   `bendSheet`, ...) for headless use.
 - `samples/bolt|gem/build.ts` — generate original SVG art + rig + animations in code.
@@ -45,7 +50,8 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
   `--bend` sheets), `validate.ts`, `mcp-call.ts` (call MCP tools over stdio; images go to out/mcp), `stake-lines.ts`,
   `split.ts` (`regions` / `build` for flat pictures).
 - `docs/format.md` (format spec), `docs/rigging.md` (rigging guide), `docs/split.md` (flat picture
-  split), `docs/mcp.md` (Claude/MCP guide), `docs/stake.md` (Stake integration), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
+  split), `docs/editor.md` (timeline editor), `docs/mcp.md` (Claude/MCP guide), `docs/stake.md` (Stake
+  integration), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
 
 ## Conventions
 
@@ -82,6 +88,12 @@ For split changes, look at the region map and the layer sheet (magenta = rebuilt
 
 ```bash
 pnpm split regions samples/kit-flat/source/kit-flat.jpg && pnpm samples kit-flat
+```
+
+For editor changes, run it and use it (the e2e test also drives it in Chromium):
+
+```bash
+pnpm editor out/projects/<name>
 ```
 
 For MCP changes, call the tools end to end and look at the returned images:
