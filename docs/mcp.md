@@ -11,6 +11,9 @@ create_project → (그림 확인) → set_rig_spec → (뼈 위치 확인) → 
 → apply_preset / set_animation → (렌더 프레임 확인 후 수정) → validate_project → export_project
 ```
 
+Claude가 만든 애니메이션은 [타임라인 편집기](editor.md)(`pnpm editor`)에서 사람이 직접 다듬을 수 있습니다.
+같은 `animations.json`을 쓰므로 Claude가 고치면 편집기가 다시 불러오고, 편집기에서 저장한 것은 Claude가 다시 읽고 이어서 고칩니다.
+
 레이어 없는 그림 한 장(PNG/JPEG/WebP)도 됩니다. `create_project`가 번호 붙은 영역 그림을 주면
 Claude가 `split_art`로 부위를 묶어 PSD를 만든 뒤 같은 순서로 진행합니다. 자세한 내용은
 [자동 분리](split.md).

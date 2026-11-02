@@ -24,6 +24,7 @@ Workflow
 5. Animate: apply_preset for standard motions (see list_presets), set_animation for custom keys. Build one animation from several presets with mode "merge" and "start".
 6. After every change, look at the frames (the edit tools return a preview; render_animation for more detail) and fix what looks wrong: limbs hidden behind other layers, feet sliding or detaching, overshoot, loops that jump.
 7. validate_project, then export_project into the game's assets.
+A person may fine-tune animations in the timeline editor (pnpm editor <dir>), which saves the same animations.json: read animations again (get_animation) before changing them.
 
 Conventions
 - y points down. Angles in degrees; positive = clockwise on screen.

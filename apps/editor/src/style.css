@@ -1,0 +1,50 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  font-size: 13px;
+  color: #e8eaf4;
+  background: #1b1d29;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+}
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+button,
+select {
+  background: #2a2e42;
+  border: 1px solid #ffffff1f;
+  border-radius: 5px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: #343954;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+input[type='number'],
+input[type='text'] {
+  background: #141621;
+  border: 1px solid #ffffff22;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+input[type='color'] {
+  background: none;
+  border: 1px solid #ffffff22;
+  border-radius: 4px;
+  width: 44px;
+  height: 26px;
+  padding: 1px;
+}
