@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { CURVE_NAMES, Skeleton, SkeletonData, bendTest, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
 import { applyPreset, describePresets, findPreset, mergeAnimations } from '@llm2d/motion';
 import { exportSkeleton } from '@llm2d/export';
-import { Previewer, inspectImage } from '@llm2d/preview';
-import { Project, type ProjectSpec } from './project.ts';
+import { Previewer, decodeImage, inspectImage, regionsImage, splitSheet } from '@llm2d/preview';
+import { regionTable, type Segmentation, type SplitReport } from '@llm2d/rig';
+import { PICTURE, Project, type ProjectSpec } from './project.ts';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -16,6 +17,7 @@ export const INSTRUCTIONS = `LLM2D rigs and animates 2D art for slot games (char
 
 Workflow
 1. create_project(dir, art = a layered PSD). Look at the inspect image: layer boxes over the art and a pixel grid labelled in art pixels.
+   Only a flat picture (PNG/JPEG/WebP)? create_project returns it cut into numbered colour regions. Call split_art with the body parts back to front, each listing its region numbers (outlines and small details inside a part go with it automatically). Check the layer sheet: magenta marks areas rebuilt behind front parts. Then continue with step 2 on the layered result.
 2. set_rig_spec: place bones by joint in art pixels ("from" = pivot, "to" = tip). Use "chains" for tails, hair, scarves, ears (only the root point is needed; bones follow the middle of the shape). In "parts", give each layer the bones that move it: one bone = rigid, several = a bending mesh with automatic weights. The reply overlays your bones on the art; check every pivot sits on the joint before building.
 3. build_rig: read the bend test. Fix errors (move joints, add a bone, lower "spacing" or raise "softness" for that part) before animating.
 4. describe_skeleton: bone names, setup angles, slots and attachments.
@@ -160,30 +162,149 @@ export function createServer() {
 
   // ---------------- Project & rig ----------------
 
+  const regionsText = (seg: Segmentation, note: string) =>
+    `Picture ${seg.width}x${seg.height} px, ${note}. ${seg.regions.length} regions` +
+    `${seg.outline ? `, outlines about ${seg.outline.width.toFixed(1)} px (they go to the part in front)` : ', no outlines found'}.\n` +
+    `Regions (id, mean colour, size, a point inside, neighbours):\n${regionTable(seg)}`;
+
+  const splitText = (r: SplitReport) =>
+    `Rebuild radius ${r.fill} px, overlap ${r.overlap} px. Restacked layers ${r.difference === 0 ? 'match the picture exactly' : `differ from the picture by up to ${r.difference}`}.\n` +
+    `Layers (back to front):\n` +
+    r.parts
+      .map(
+        (p) =>
+          `  ${p.name}: ${p.pixels} px${p.filled ? ` + ${p.filled} rebuilt` : ''}${p.box ? ` at x=${p.box.x} y=${p.box.y} ${p.box.width}x${p.box.height}` : ''}` +
+          ` regions ${p.regions.join(' ') || '-'}${p.auto.length ? ` (+ joined ${p.auto.join(' ')})` : ''}`,
+      )
+      .join('\n') +
+    (r.removed.length ? `\nRemoved regions: ${r.removed.join(' ')}` : '') +
+    (r.warnings.length ? `\nWarnings:\n  ${r.warnings.join('\n  ')}` : '');
+
   tool(
     'create_project',
     {
-      title: 'Create project from layered art',
+      title: 'Create project from art',
       description:
-        'Starts an LLM2D project from a layered PSD: copies the art into <dir>/source, writes a starter rig.json (origin and scale guessed) and returns the layer list with an inspect image (layer boxes and a pixel grid in art pixels) for placing joints.',
+        'Starts an LLM2D project from a layered PSD, or from a single flat picture (PNG/JPEG/WebP). Copies the art into <dir>/source and writes a starter rig.json (origin and scale guessed). ' +
+        'PSD: returns the layer list with an inspect image (layer boxes and a pixel grid in art pixels) for placing joints. ' +
+        'Flat picture: removes a plain background and returns the picture cut into numbered colour regions over a pixel grid, with a region table; next, group the regions into parts with split_art.',
       input: {
         dir: dirArg,
-        art: z.string().describe('Path to the layered PSD.'),
+        art: z.string().describe('Path to a layered PSD, or to a flat PNG/JPEG/WebP picture.'),
         kind: z.enum(['character', 'symbol']).default('character').describe('Sets the origin: feet for characters, centre for symbols.'),
         name: z.string().optional().describe('Skeleton name. Default: folder name.'),
         scale: z.number().positive().optional().describe('Skeleton units per art pixel. Default 0.5 for art over 1200 px, else 1.'),
+        background: z.string().optional().describe('Flat pictures: "auto" (default) removes a plain border colour, "none" keeps it, or a colour "#rrggbb" to remove.'),
+        detail: z.number().positive().max(4).optional().describe('Flat pictures: region detail, 1 = default, 2 = finer, 0.5 = coarser.'),
         overwrite: z.boolean().default(false).describe('Replace an existing rig.json.'),
-        image: z.boolean().default(true).describe('Return the inspect image.'),
+        image: z.boolean().default(true).describe('Return the inspect / region image.'),
       },
     },
     async (a) => {
-      const { project, art, spec } = await Project.create(a.dir, a.art, { kind: a.kind, name: a.name, scale: a.scale, overwrite: a.overwrite });
+      const flat = PICTURE.test(a.art);
+      const { project, art, spec, picture } = await exclusive(() =>
+        Project.create(a.dir, a.art, {
+          kind: a.kind,
+          name: a.name,
+          scale: a.scale,
+          overwrite: a.overwrite,
+          decode: decodeImage,
+          background: a.background,
+          detail: a.detail,
+        }),
+      );
+      const head = `Project ${project.dir}\nrig.json: name "${spec.name}", scale ${spec.scale}, origin [${spec.origin}] (${a.kind}).`;
+      if (flat && picture) {
+        const out: Content[] = [
+          text(
+            `${head}\n${regionsText(picture.segmentation, picture.background.note)}\n\n` +
+              'Next: split_art with the parts back to front (like PSD layers bottom to top), each listing region ids from the image. ' +
+              'Small details inside a part (buttons, highlights, stripes) join it automatically. If regions run across two parts, call segment_art with a higher detail, or cut with a polygon.',
+          ),
+        ];
+        if (a.image) out.push(image(await exclusive(() => regionsImage(picture.image, picture.segmentation))));
+        return out;
+      }
+      const out: Content[] = [text(`${head}\n${layerTable(art)}\n\nNext: set_rig_spec with bones (pixel coordinates from the grid), chains and parts.`)];
+      if (a.image) out.push(image(await exclusive(() => inspectImage(art, { spec }))));
+      return out;
+    },
+  );
+
+  tool(
+    'segment_art',
+    {
+      title: 'Segment flat picture',
+      description:
+        'Re-cuts the flat picture of a project into numbered colour regions with other settings (finer or coarser regions, background handling) and returns the region image and table. Region ids change; use the new ones in split_art.',
+      input: {
+        dir: dirArg,
+        detail: z.number().positive().max(4).optional().describe('1 = default, 2 = finer regions, 0.5 = coarser.'),
+        background: z.string().optional().describe('"auto", "none" or a colour "#rrggbb" to remove.'),
+        image: z.boolean().default(true),
+      },
+    },
+    async (a) => {
+      const project = new Project(a.dir);
+      const split = await project.requireSplit();
+      await project.writeSplit({ ...split, detail: a.detail ?? split.detail, background: a.background ?? split.background });
+      const picture = await exclusive(() => project.readPicture(decodeImage));
+      const out: Content[] = [text(regionsText(picture.segmentation, picture.background.note))];
+      if (a.image) out.push(image(await exclusive(() => regionsImage(picture.image, picture.segmentation))));
+      return out;
+    },
+  );
+
+  const regionRef = z.union([z.number().int().positive(), pt]);
+  tool(
+    'split_art',
+    {
+      title: 'Split flat picture into layers',
+      description:
+        'Turns the flat picture into layered art, one layer per part, and writes it as the project PSD (then set_rig_spec / build_rig work as for any PSD). ' +
+        'List parts back to front. Each part takes regions (ids from create_project / segment_art, or [x, y] points inside them), and/or a polygon (everything inside it), and/or strokes (a polygon around a feature drawn on a surface, e.g. a mouth: takes everything inside except the surrounding colour). ' +
+        'Outlines between parts go to the front one. Where a part is covered by parts in front of it, it is rebuilt underneath (shape closed, own colours, outline continued), so it can move. ' +
+        'Returns a sheet of the layers (magenta = rebuilt pixels) and the inspect image for placing bones.',
+      input: {
+        dir: dirArg,
+        parts: z
+          .array(
+            z.object({
+              name: z.string().regex(/^[A-Za-z0-9_-]+$/).describe('Layer name, e.g. arm_l, head.'),
+              regions: z.array(regionRef).optional().describe('Region ids or [x, y] art pixels inside regions.'),
+              polygon: z.array(pt).optional().describe('Everything inside this polygon (art pixels) goes to the part.'),
+              strokes: z.array(pt).optional().describe('Everything inside this polygon except the colour around it (mouths, eyebrows, whiskers).'),
+              rest: z.boolean().optional().describe('Takes every region no other part lists.'),
+              fill: z.number().min(0).optional().describe('Rebuild radius under front parts (px). Default 10% of the figure.'),
+              overlap: z.number().min(0).optional().describe('How far the part reaches under front parts at shared edges (px).'),
+            }),
+          )
+          .min(1)
+          .describe('Back to front.'),
+        remove: z.array(regionRef).optional().describe('Regions to delete (e.g. leftover background inside the figure).'),
+        fill: z.number().min(0).optional().describe('Default rebuild radius (px).'),
+        overlap: z.number().min(0).optional().describe('Default overlap (px).'),
+        outline: z.boolean().optional().describe('Continue outlines along rebuilt edges. Default: when the art has outlines.'),
+        image: z.boolean().default(true).describe('Return the layer sheet and inspect image.'),
+      },
+    },
+    async (a) => {
+      const project = new Project(a.dir);
+      const result = await exclusive(() =>
+        project.split(decodeImage, { parts: a.parts, remove: a.remove, fill: a.fill, overlap: a.overlap, outline: a.outline }),
+      );
+      const spec = await project.requireSpec();
       const out: Content[] = [
         text(
-          `Project ${project.dir}\nrig.json: name "${spec.name}", scale ${spec.scale}, origin [${spec.origin}] (${a.kind}).\n${layerTable(art)}\n\nNext: set_rig_spec with bones (pixel coordinates from the grid), chains and parts.`,
+          `Wrote ${result.psd} (${result.art.layers.length} layers) and split.json.\n${splitText(result.report)}\n\n` +
+            'Check the sheet: each layer should hold one part; magenta areas are guesses for what front parts hide. ' +
+            'Fix wrong groupings by moving region ids or adding polygons, then split_art again. Next: set_rig_spec (layer names are the part names).',
         ),
       ];
-      if (a.image) out.push(image(await exclusive(() => inspectImage(art, { spec }))));
+      if (a.image) {
+        out.push(image(await exclusive(() => splitSheet(result))));
+        out.push(image(await exclusive(() => inspectImage(result.art, { spec }))));
+      }
       return out;
     },
   );

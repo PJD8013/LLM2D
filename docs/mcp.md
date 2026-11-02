@@ -11,6 +11,10 @@ create_project → (그림 확인) → set_rig_spec → (뼈 위치 확인) → 
 → apply_preset / set_animation → (렌더 프레임 확인 후 수정) → validate_project → export_project
 ```
 
+레이어 없는 그림 한 장(PNG/JPEG/WebP)도 됩니다. `create_project`가 번호 붙은 영역 그림을 주면
+Claude가 `split_art`로 부위를 묶어 PSD를 만든 뒤 같은 순서로 진행합니다. 자세한 내용은
+[자동 분리](split.md).
+
 ## 연결하기
 
 Node 22.18 이상, pnpm, Playwright Chromium이 필요합니다.
@@ -54,6 +58,7 @@ claude
 
 - "samples/kit/source/kit.psd로 캐릭터 프로젝트를 out/fox에 만들고 리깅해줘. 꼬리와 스카프는
   체인으로, 다리는 IK로."
+- "이 그림 한 장(fox.jpg)을 부위별로 나눠서 캐릭터로 만들어줘. 귀, 팔, 다리, 꼬리가 움직이게."
 - "fox에 idle 만들어줘. 숨쉬기, 꼬리 흔들기, 1.6초에 눈 깜빡임."
 - "이 심볼 PSD로 land, win, idle 만들어줘. 빛과 반짝임 레이어도 써서."
 - "win이 너무 약해. 첫 박자를 더 크게 하고 반짝임을 늦게."
@@ -63,7 +68,9 @@ claude
 
 | 도구 | 하는 일 |
 |---|---|
-| `create_project` | PSD를 프로젝트 폴더로 복사하고 시작용 `rig.json`(원점·배율 추정)을 만듦. 레이어 목록과 확인 이미지 반환 |
+| `create_project` | PSD를 프로젝트 폴더로 복사하고 시작용 `rig.json`(원점·배율 추정)을 만듦. 레이어 목록과 확인 이미지 반환. 그림 한 장이면 배경을 지우고 번호 붙은 영역 그림과 영역 표 반환 |
+| `segment_art` | 그림 한 장을 다른 설정(영역 세밀도, 배경 처리)으로 다시 영역 나누기 |
+| `split_art` | 영역을 부위로 묶어 레이어 PSD를 만듦. 외곽선은 앞 부위로, 가려진 곳은 자동 복원. 레이어 확인 그림(자홍색 = 복원한 곳)과 레이어 상자 그림 반환 |
 | `inspect_art` | 레이어 목록 + 격자·레이어 상자·현재 뼈가 그려진 이미지 |
 | `get_rig_spec` / `set_rig_spec` | 리그 명세 읽기/쓰기. 쓰면 뼈를 그림 위에 겹친 이미지를 돌려줘서 관절 위치를 확인 |
 | `build_rig` | 메시·체인·가중치 자동 생성, `.l2d.json` 저장, 구부림 테스트 결과와 자세 이미지 |
@@ -98,7 +105,8 @@ claude
 
 ```
 out/fox/
-  source/kit.psd      원본 그림 (create_project가 복사)
+  source/kit.psd      원본 그림 (create_project가 복사; 그림 한 장이면 split_art가 만듦)
+  split.json          그림 한 장에서 시작한 경우: 원본 그림 경로, 배경·세밀도 설정, 부위 묶음
   rig.json            리그 명세 (art 경로 포함)
   animations.json     애니메이션 원본
   fox.l2d.json        빌드된 스켈레톤 (애니메이션 편집 시 함께 갱신)

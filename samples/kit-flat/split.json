@@ -1,0 +1,18 @@
+{
+  "$comment": "Parts of samples/kit-flat/source/kit-flat.jpg, back to front. Regions are given as points inside them (art pixels) so the file does not depend on region numbering; small details (buttons, highlights, fingers) join the part around them. The mouth is a stroke drawn on the face, so it is cut out with a polygon.",
+  "background": "auto",
+  "parts": [
+    { "name": "tail", "regions": [[1001, 798], [915, 900], [1037, 907], [883, 994], [866, 1116]] },
+    { "name": "ear_l", "regions": [[422, 231], [417, 284], [470, 287], [452, 348]] },
+    { "name": "ear_r", "regions": [[776, 232], [781, 282], [728, 289], [747, 348]] },
+    { "name": "arm_l", "regions": [[412, 988], [410, 1033], [385, 1090]] },
+    { "name": "arm_r", "regions": [[763, 886], [791, 984], [791, 1034], [813, 1090]] },
+    { "name": "leg_l", "regions": [[505, 1326], [528, 1432], [549, 1505]] },
+    { "name": "leg_r", "regions": [[693, 1226], [673, 1429], [650, 1505]] },
+    { "name": "body", "regions": [[607, 717], [723, 789], [599, 850], [502, 1099], [698, 1062], [540, 1194], [585, 1205], [651, 1202]] },
+    { "name": "scarf", "regions": [[721, 722], [586, 762], [668, 756], [695, 879], [702, 934]] },
+    { "name": "head", "regions": [[594, 361], [599, 446], [465, 591], [614, 592], [717, 591], [678, 638]] },
+    { "name": "eyes", "regions": [[529, 510], [681, 510], [531, 485], [683, 485]] },
+    { "name": "mouth", "strokes": [[560, 612], [640, 612], [640, 646], [560, 646]] }
+  ]
+}

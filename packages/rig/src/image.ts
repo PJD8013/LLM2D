@@ -199,3 +199,97 @@ export function distanceTransform(mask: Uint8Array, w: number, h: number): Float
   for (let i = 0; i < out.length; i++) out[i] = Math.sqrt(grid[i]);
   return out;
 }
+
+/** Disk dilation: pixels within `r` of the mask (Euclidean). */
+export function dilateDisk(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  if (r <= 0) return mask.slice();
+  const inv = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) inv[i] = mask[i] ? 0 : 1;
+  const d = distanceTransform(inv, w, h);
+  const out = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) out[i] = mask[i] || d[i] <= r ? 1 : 0;
+  return out;
+}
+
+/** Disk erosion: mask pixels further than `r` from the outside. */
+export function erodeDisk(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  if (r <= 0) return mask.slice();
+  const d = distanceTransform(mask, w, h);
+  const out = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) out[i] = d[i] > r ? 1 : 0;
+  return out;
+}
+
+/** Disk closing (dilate then erode): fills gaps and bites narrower than about 2r. Keeps the mask. */
+export function closeDisk(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  if (r <= 0) return mask.slice();
+  // Pad so shapes touching the image border close the same way as everywhere else.
+  const p = Math.ceil(r) + 1;
+  const W = w + 2 * p;
+  const H = h + 2 * p;
+  const padded = new Uint8Array(W * H);
+  for (let y = 0; y < h; y++) padded.set(mask.subarray(y * w, y * w + w), (y + p) * W + p);
+  const closed = erodeDisk(dilateDisk(padded, W, H, r), W, H, r);
+  const out = new Uint8Array(mask.length);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) out[y * w + x] = mask[y * w + x] || closed[(y + p) * W + x + p] ? 1 : 0;
+  return out;
+}
+
+/**
+ * Multi-source geodesic growth over `passable` pixels with chamfer distances (orthogonal 5,
+ * diagonal 7, so ~5 units per pixel). Seeds are pixels with `seeds[i] >= 0`; every passable
+ * pixel reached within `maxDist` pixels takes the label of its nearest seed. Returns the labels
+ * (-1 = not reached) and distances in pixels.
+ */
+export function growLabels(
+  seeds: Int32Array,
+  passable: Uint8Array,
+  w: number,
+  h: number,
+  maxDist = Infinity,
+): { label: Int32Array; dist: Float32Array } {
+  const n = w * h;
+  const label = new Int32Array(n).fill(-1);
+  const dist = new Int32Array(n).fill(0x7fffffff);
+  const limit = maxDist === Infinity ? 0x7ffffffe : Math.round(maxDist * 5);
+  // Dial's algorithm: circular buckets (edge weights are at most 7).
+  const buckets: number[][] = Array.from({ length: 8 }, () => []);
+  let pending = 0;
+  for (let i = 0; i < n; i++)
+    if (seeds[i] >= 0) {
+      label[i] = seeds[i];
+      dist[i] = 0;
+      buckets[0].push(i);
+      pending++;
+    }
+  const DX = [1, -1, 0, 0, 1, 1, -1, -1];
+  const DY = [0, 0, 1, -1, 1, -1, 1, -1];
+  const DW = [5, 5, 5, 5, 7, 7, 7, 7];
+  for (let d = 0; pending > 0; d++) {
+    const bucket = buckets[d & 7];
+    while (bucket.length) {
+      const i = bucket.pop()!;
+      pending--;
+      if (dist[i] !== d) continue;
+      const x = i % w;
+      const y = (i - x) / w;
+      for (let k = 0; k < 8; k++) {
+        const nx = x + DX[k];
+        const ny = y + DY[k];
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        if (!passable[j]) continue;
+        const nd = d + DW[k];
+        if (nd > limit || nd >= dist[j]) continue;
+        dist[j] = nd;
+        label[j] = label[i];
+        buckets[nd & 7].push(j);
+        pending++;
+      }
+    }
+  }
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = label[i] >= 0 ? dist[i] / 5 : Infinity;
+  return { label, dist: out };
+}

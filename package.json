@@ -16,6 +16,7 @@
     "validate": "node scripts/validate.ts",
     "render": "node scripts/render.ts",
     "rig": "node scripts/rig.ts",
+    "split": "node scripts/split.ts",
     "mcp": "node packages/mcp/src/server.ts",
     "mcp:call": "node scripts/mcp-call.ts",
     "export": "node scripts/export.ts",

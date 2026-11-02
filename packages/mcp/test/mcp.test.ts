@@ -1,9 +1,10 @@
-import { copyFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createImage, encodePng, readPsd } from '@llm2d/rig';
 import { createServer } from '../src/index.ts';
 
 const root = join(import.meta.dirname, '../../..');
@@ -53,8 +54,10 @@ describe('llm2d MCP server', () => {
         'list_presets',
         'render_animation',
         'render_frame',
+        'segment_art',
         'set_animation',
         'set_rig_spec',
+        'split_art',
         'validate_project',
       ].sort(),
     );
@@ -120,5 +123,62 @@ describe('llm2d MCP server', () => {
     expect(preset.text).toContain('unknown bone "tail9"');
     const missing = await call('delete_animation', { dir, name: 'nope' });
     expect(missing.isError).toBe(true);
+  });
+
+  it('starts from a flat picture: regions, split into layers, rig', async () => {
+    // An outlined orange tail behind an outlined teal body, on white.
+    const w = 300;
+    const h = 240;
+    const img = createImage(w, h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const body = Math.max(Math.abs(x - 110) - 50, Math.abs(y - 130) - 90);
+        const tail = Math.hypot((x - 200) / 80, (y - 150) / 30) - 1;
+        const c = body <= 0 ? (body > -5 ? [40, 30, 25] : [40, 130, 120]) : tail <= 0 ? (tail > -0.08 ? [40, 30, 25] : [240, 140, 60]) : [255, 255, 255];
+        img.data.set([...c, 255], (y * w + x) * 4);
+      }
+    const work = mkdtempSync(join(tmpdir(), 'llm2d-flat-'));
+    writeFileSync(join(work, 'critter.png'), encodePng(img));
+    const flat = join(work, 'critter');
+    const created = await call('create_project', { dir: flat, art: join(work, 'critter.png'), kind: 'character', image: false });
+    expect(created.isError, created.text).toBeFalsy();
+    expect(created.text).toContain('removed background #ffffff');
+    expect(created.text).toMatch(/2 regions, outlines about/);
+    expect(created.text).toContain('Next: split_art');
+    expect((await call('inspect_art', { dir: flat })).text).toContain('Call split_art first');
+
+    const unassigned = await call('split_art', { dir: flat, parts: [{ name: 'tail', regions: [[250, 150]] }], image: false });
+    expect(unassigned.isError).toBe(true);
+    expect(unassigned.text).toMatch(/Regions not in any part/);
+
+    const split = await call('split_art', {
+      dir: flat,
+      parts: [
+        { name: 'tail', regions: [[250, 150]] },
+        { name: 'body', regions: [[110, 130]] },
+      ],
+      image: false,
+    });
+    expect(split.isError, split.text).toBeFalsy();
+    expect(split.text).toContain('Restacked layers match the picture exactly');
+    expect(split.text).toMatch(/tail: \d+ px \+ \d+ rebuilt/);
+    const psd = readPsd(readFileSync(join(flat, 'source', 'critter.psd')));
+    expect(psd.layers.map((l) => l.name)).toEqual(['tail', 'body']);
+    const saved = JSON.parse(readFileSync(join(flat, 'split.json'), 'utf8'));
+    expect(saved.picture).toBe('source/critter.png');
+    expect(saved.parts).toHaveLength(2);
+
+    const spec = JSON.parse((await call('get_rig_spec', { dir: flat })).text);
+    spec.bones = [
+      { name: 'hip', from: [110, 200], to: [110, 60] },
+      { name: 'tail1', parent: 'hip', from: [150, 150], to: [210, 150] },
+      { name: 'tail2', parent: 'tail1', from: [210, 150], to: [275, 150] },
+    ];
+    spec.parts = { tail: { bones: ['tail1', 'tail2'] }, body: { bone: 'hip' } };
+    expect((await call('set_rig_spec', { dir: flat, spec, image: false })).text).toContain('No naming problems found');
+    const built = await call('build_rig', { dir: flat, bend_sheet: false });
+    expect(built.isError, built.text).toBeFalsy();
+    expect(built.text).toMatch(/tail: mesh \d+v -> tail1, tail2/);
+    expect(built.text).toMatch(/bend test: .*(clean|0 error)/);
   });
 });

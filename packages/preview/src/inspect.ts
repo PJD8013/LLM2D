@@ -20,18 +20,9 @@ export async function inspectImage(art: LayeredArt, options: InspectOptions = {}
   const k = Math.min(1, (options.maxSize ?? 1400) / Math.max(w, h));
   const W = Math.round(w * k);
   const H = Math.round(h * k);
-  // Grid step in art pixels: major lines at least ~70 screen pixels apart.
-  const step = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000].find((s) => s * k >= 70) ?? 5000;
-  const minor = step / 2;
   const png = encodePng(composite(art.layers, w, h)).toString('base64');
   const X = (x: number) => (x * k).toFixed(1);
-  const parts: string[] = [];
-  for (let x = 0; x <= w; x += minor)
-    parts.push(`<line x1="${X(x)}" y1="0" x2="${X(x)}" y2="${H}" stroke="${x % step ? '#0002' : '#0005'}"/>`);
-  for (let y = 0; y <= h; y += minor)
-    parts.push(`<line x1="0" y1="${X(y)}" x2="${W}" y2="${X(y)}" stroke="${y % step ? '#0002' : '#0005'}"/>`);
-  for (let x = step; x < w; x += step) parts.push(label(x * k + 3, 14, String(x), '#333'));
-  for (let y = step; y < h; y += step) parts.push(label(3, y * k - 3, String(y), '#333'));
+  const parts: string[] = gridSvg(w, h, k);
   art.layers.forEach((l, i) => {
     if (l.hidden) return;
     const c = PALETTE[i % PALETTE.length];
@@ -59,10 +50,32 @@ export async function inspectImage(art: LayeredArt, options: InspectOptions = {}
       parts.push(label(ox + 8, oy - 8, 'origin', '#000'));
     }
   }
-  const html = `<html><body style="margin:0;background:#fff">
+  return overlay(png, W, H, parts);
+}
+
+/** A light pixel grid with labels in art pixels (major lines at least ~70 screen px apart). */
+export function gridSvg(w: number, h: number, k: number): string[] {
+  const step = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000].find((s) => s * k >= 70) ?? 5000;
+  const minor = step / 2;
+  const X = (x: number) => (x * k).toFixed(1);
+  const W = X(w);
+  const H = X(h);
+  const parts: string[] = [];
+  for (let x = 0; x <= w; x += minor)
+    parts.push(`<line x1="${X(x)}" y1="0" x2="${X(x)}" y2="${H}" stroke="${x % step ? '#0002' : '#0005'}"/>`);
+  for (let y = 0; y <= h; y += minor)
+    parts.push(`<line x1="0" y1="${X(y)}" x2="${W}" y2="${X(y)}" stroke="${y % step ? '#0002' : '#0005'}"/>`);
+  for (let x = step; x < w; x += step) parts.push(label(x * k + 3, 14, String(x), '#333'));
+  for (let y = step; y < h; y += step) parts.push(label(3, y * k - 3, String(y), '#333'));
+  return parts;
+}
+
+/** Screenshots a PNG (base64) of W x H with SVG markup drawn over it. */
+export async function overlay(png: string, W: number, H: number, svg: string[], background = '#fff'): Promise<Buffer> {
+  const html = `<html><body style="margin:0;background:${background}">
     <div style="position:relative;width:${W}px;height:${H}px">
       <img src="data:image/png;base64,${png}" style="position:absolute;left:0;top:0;width:${W}px;height:${H}px"/>
-      <svg width="${W}" height="${H}" style="position:absolute;left:0;top:0;font:600 14px system-ui,sans-serif">${parts.join('')}</svg>
+      <svg width="${W}" height="${H}" style="position:absolute;left:0;top:0;font:600 14px system-ui,sans-serif">${svg.join('')}</svg>
     </div></body></html>`;
   const page = await (await getBrowser()).newPage({ viewport: { width: W, height: H } });
   try {
@@ -73,7 +86,7 @@ export async function inspectImage(art: LayeredArt, options: InspectOptions = {}
   }
 }
 
-function label(x: number, y: number, text: string, color: string): string {
+export function label(x: number, y: number, text: string, color: string): string {
   const safe = text.replace(/[<&>]/g, (c) => ({ '<': '&lt;', '&': '&amp;', '>': '&gt;' })[c]!);
   return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" fill="${color}" stroke="#fff" stroke-width="4" paint-order="stroke">${safe}</text>`;
 }

@@ -9,7 +9,7 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
                  (2단계)        (3단계, MCP)            (1단계: 포맷·런타임)       (4단계)
 ```
 
-## 현재 상태: 4단계 완료 + 실제 Stake 게임 적용
+## 현재 상태: 4단계 완료 + 실제 Stake 게임 적용 + 그림 한 장 자동 분리
 
 | 구성 요소 | 위치 | 내용 |
 |---|---|---|
@@ -18,15 +18,16 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
 | PixiJS 8 런타임 | [`packages/pixi`](packages/pixi) | `Llm2dActor`. API를 spine-pixi-v8과 맞춤(`actor.state.setAnimation(0, 'win', true)`) |
 | 뷰어 | [`apps/viewer`](apps/viewer) | 애니메이션 재생, 속도, 전환 시간, 타임라인, 뼈/메시/IK 표시, 파일 끌어다 놓기 |
 | 자동 리깅 | [`packages/rig`](packages/rig), [`docs/rigging.md`](docs/rigging.md) | PSD 읽기 → 알파 윤곽으로 메시 생성 → 중심선 따라 체인 뼈 자동 배치 → 자동 가중치. 관절 좌표만 `rig.json`에 적으면 됨 |
+| 평면 그림 자동 분리 | [`packages/rig`](packages/rig), [`docs/split.md`](docs/split.md) | 레이어 없는 그림 한 장(PNG/JPEG)을 부위별 레이어 PSD로. 배경 제거, 번호 붙은 색 영역, 외곽선은 앞 부위로, 가려진 곳 자동 복원(다시 겹치면 원본과 픽셀 단위로 같음) |
 | 구부림 테스트 | [`packages/core/src/bendTest.ts`](packages/core/src/bendTest.ts) | 관절 회전, IK 웅크리기·흔들기로 메시가 접히거나 찢어지는지 자동 검사 |
-| Claude 연결 (MCP) | [`packages/mcp`](packages/mcp), [`docs/mcp.md`](docs/mcp.md) | Claude가 리깅·애니메이션·렌더 확인·내보내기를 직접 하는 도구 16개. `.mcp.json`으로 Claude Code에 바로 연결 |
+| Claude 연결 (MCP) | [`packages/mcp`](packages/mcp), [`docs/mcp.md`](docs/mcp.md) | Claude가 리깅·애니메이션·렌더 확인·내보내기를 직접 하는 도구 18개. `.mcp.json`으로 Claude Code에 바로 연결 |
 | 모션 프리셋 | [`packages/motion`](packages/motion) | 심볼(idle, land, win, 기대감, 빅윈 타이틀)과 캐릭터(흔들림, 숨쉬기, 깜빡임, 말하기, 손 흔들기, 점프) 등 16종 |
 | 미리보기 렌더러 | [`packages/preview`](packages/preview) | 헤드리스 브라우저로 그림 확인 이미지, 애니메이션 프레임, 구부림 자세를 PNG로 렌더 |
 | 게임 내보내기 | [`packages/export`](packages/export) | 텍스처 아틀라스 묶기(가장자리 번짐 방지), 모바일용 축소, 줄인 JSON |
 | Stake 연동 | [`packages/svelte`](packages/svelte), [`docs/stake.md`](docs/stake.md) | pixi-svelte용 `Llm2dProvider`/`Llm2dTrack`/`Llm2dBone`, Pixi 에셋 로더, 설치용 tgz(`pnpm pack:lib`) |
 | 릴 데모 | [`apps/reel-demo`](apps/reel-demo) | Svelte 5 + pixi-svelte 5x3 보드. 착지·당첨 애니메이션과 당첨에 반응하는 여우 |
 | 실제 Stake 게임 | [`examples/stake-lines`](examples/stake-lines) | 공식 web-sdk 샘플 게임 `lines`의 H1 심볼을 LLM2D 동전으로 교체하는 패치와 적용·캡처 스크립트(`pnpm stake:lines`) |
-| 샘플 | [`samples`](samples) | Bolt(호스트 로봇), Gem(심볼: idle/land/win), Kit(PSD에서 자동 리깅한 여우: 휘는 팔·다리·꼬리·귀·스카프), Coin(MCP 도구로 리깅·애니메이션한 금화). 모두 원본 그림 |
+| 샘플 | [`samples`](samples) | Bolt(호스트 로봇), Gem(심볼: idle/land/win), Kit(PSD에서 자동 리깅한 여우: 휘는 팔·다리·꼬리·귀·스카프), Coin(MCP 도구로 리깅·애니메이션한 금화), Kit-flat(여우를 JPEG 한 장으로 합친 뒤 자동 분리해 다시 리깅). 모두 원본 그림 |
 | 렌더 스크립트 | [`scripts/render.ts`](scripts/render.ts) | 헤드리스 브라우저로 애니메이션 프레임이나 구부림 테스트 자세를 한 장에 모아 PNG로 저장. 3단계에서 Claude가 결과를 눈으로 확인하는 데 씀 |
 
 ## 시작하기
@@ -66,6 +67,14 @@ pnpm rig build samples/kit/source/kit.psd --spec samples/kit/rig.json --animatio
 ```
 
 ```bash
+pnpm split regions samples/kit-flat/source/kit-flat.jpg   # 그림 한 장: 번호 붙은 영역 그림
+```
+
+```bash
+pnpm split build samples/kit-flat/source/kit-flat.jpg --spec samples/kit-flat/split.json --psd out/kit-flat.psd
+```
+
+```bash
 pnpm render --file bolt/bolt.l2d.json --anim cheer --frames 8 --debug   # out/renders/에 PNG 저장
 ```
 
@@ -93,7 +102,7 @@ pnpm pack:lib            # Stake 게임에 설치할 tgz 만들기 (out/packages
 pnpm stake:lines apply ../web-sdk   # Stake web-sdk의 lines 게임에 동전 심볼 붙이기
 ```
 
-자동 리깅 사용법은 [`docs/rigging.md`](docs/rigging.md), Claude 연결은 [`docs/mcp.md`](docs/mcp.md),
+자동 리깅 사용법은 [`docs/rigging.md`](docs/rigging.md), 그림 한 장 자동 분리는 [`docs/split.md`](docs/split.md), Claude 연결은 [`docs/mcp.md`](docs/mcp.md),
 Stake 게임 연동은 [`docs/stake.md`](docs/stake.md), 실제 Stake 게임에 붙인 예는
 [`examples/stake-lines`](examples/stake-lines)에 있습니다.
 
@@ -132,7 +141,8 @@ Stake 웹 SDK(pixi-svelte)에서는 Spine 컴포넌트와 같은 모양의 `Llm2
 3. ~~Claude 연결: MCP 서버, 모션 프리셋, 렌더 결과를 보며 고치는 반복 과정~~ ✅
 4. ~~Stake 연동: 텍스처 아틀라스, pixi-svelte 컴포넌트, 릴 데모, 설치용 패키지~~ ✅
 5. ~~실제 Stake 게임 저장소에 붙여 보기: web-sdk `lines` 게임의 H1 심볼 교체~~ ✅
-6. (선택) 평면 그림 한 장 자동 분리, 타임라인 편집 화면
+6. ~~평면 그림 한 장 자동 분리: 영역 나누기, 부위 묶기, 가려진 곳 복원, MCP 도구~~ ✅
+7. (선택) 타임라인 편집 화면
 
 ## 설계 메모
 

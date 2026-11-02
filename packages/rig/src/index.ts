@@ -7,3 +7,5 @@ export { chainJoints, thin } from './chain.ts';
 export { computeWeights, type BoneSegment, type WeightOptions } from './weights.ts';
 export { bonesFromWorld, round, type WorldBone } from './bones.ts';
 export { buildRig, type RigSpec, type RigChain, type RigPart, type RigResult, type PartReport } from './build.ts';
+export { removeBackground, segmentArt, regionTable, type BackgroundOptions, type BackgroundResult, type Region, type RGB, type SegmentOptions, type Segmentation } from './segment.ts';
+export { splitArt, fillPolygon, parseColor, readPicture, type SplitFile, type RegionRef, type SplitPart, type SplitPartReport, type SplitReport, type SplitResult, type SplitSpec } from './split.ts';

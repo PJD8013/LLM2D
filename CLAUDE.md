@@ -10,10 +10,14 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - `packages/pixi` — `Llm2dActor` (PixiJS 8 `Mesh` per slot, CPU skinning) and `loadLlm2d`.
 - `packages/rig` — Node-only auto-rigging: `readPsd`, contour + constrained Delaunay `buildMesh`,
   medial-axis `chainJoints`, geodesic `computeWeights`, `buildRig(art, spec)`. `bendTest`/`bendPoses`
-  live in core so the viewer can use them.
+  live in core so the viewer can use them. Flat pictures: `segment.ts` (`removeBackground`, `segmentArt`:
+  median + Felzenszwalb graph segmentation, outline strokes as label -1, neck splitting) and `split.ts`
+  (`splitArt`: parts back to front from region ids/points/polygons/strokes, outlines to the front part,
+  hidden areas rebuilt by disk closing + overlap; restacked layers must equal the input, `report.difference`).
 - `packages/motion` — motion presets (`applyPreset`, `describePresets`, `mergeAnimations`); pure TS.
 - `packages/preview` — Node-only renders via Playwright + the viewer: `inspectImage`, `Previewer`
-  (`loadFile`, `contactSheet`, `bendSheet`, `frame`).
+  (`loadFile`, `contactSheet`, `bendSheet`, `frame`); `regionsImage`, `splitSheet`, `decodeImage`
+  (JPEG/WebP via the browser) for flat pictures.
 - `packages/export` — game export: MaxRects atlas packing with edge extrusion, `resample`, `exportSkeleton`.
 - `packages/svelte` — pixi-svelte components (`Llm2dProvider`, `Llm2dTrack`, `Llm2dBone`). Checked with
   svelte-check (root tsc excludes it). Imports inside it use `.js` extensions because svelte-package does
@@ -30,14 +34,18 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
   for the coin; `pnpm stake:lines apply <web-sdk>` vendors the tgz, exports the coin and applies it,
   `pnpm stake:lines capture` screenshots the running Storybook (port 6001). Regenerate the patch with `git diff` in
   web-sdk after changing it there (use `git add -N` for new files).
+- `samples/kit-flat` — Kit merged into one JPEG (`make.ts`), split back with `split.json` (points, not ids)
+  into `source/kit-flat.psd` (gitignored, made by `pnpm samples kit-flat`), rigged with `rig.json`.
+  `packages/rig/test/split.test.ts` compares the split with Kit's real layers (IoU).
 - `samples/kit` — auto-rigged sample: `art.ts` + `make-psd.ts` produce `source/kit.psd`; `rig.json`
   (joints in PSD pixels) and `animations.ts` are the inputs to `pnpm rig build`.
 - `pnpm samples` regenerates every sample's PNGs and `<name>.l2d.json`. Edit the sources, never the
   generated JSON/PNGs by hand.
 - `scripts/` — `build-samples.ts`, `rig.ts` (inspect/build), `render.ts` (contact sheets and
-  `--bend` sheets), `validate.ts`, `mcp-call.ts` (call MCP tools over stdio; images go to out/mcp), `stake-lines.ts`.
-- `docs/format.md` (format spec), `docs/rigging.md` (rigging guide), `docs/mcp.md` (Claude/MCP
-  guide), `docs/stake.md` (Stake integration), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
+  `--bend` sheets), `validate.ts`, `mcp-call.ts` (call MCP tools over stdio; images go to out/mcp), `stake-lines.ts`,
+  `split.ts` (`regions` / `build` for flat pictures).
+- `docs/format.md` (format spec), `docs/rigging.md` (rigging guide), `docs/split.md` (flat picture
+  split), `docs/mcp.md` (Claude/MCP guide), `docs/stake.md` (Stake integration), all Korean. Keep format.md in sync with `packages/core/src/format.ts`.
 
 ## Conventions
 
@@ -68,6 +76,12 @@ For rig changes, the build prints the bend test; also look at the bend sheet:
 
 ```bash
 pnpm render --file kit/kit.l2d.json --bend
+```
+
+For split changes, look at the region map and the layer sheet (magenta = rebuilt):
+
+```bash
+pnpm split regions samples/kit-flat/source/kit-flat.jpg && pnpm samples kit-flat
 ```
 
 For MCP changes, call the tools end to end and look at the returned images:
