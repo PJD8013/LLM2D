@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { CURVE_NAMES, Skeleton, SkeletonData, bendTest, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
-import { applyPreset, describePresets, findPreset, mergeAnimations } from '@llm2d/motion';
+import { applyPreset, describePresets, findPreset, mergeAnimations, patchAnimation } from '@llm2d/motion';
 import { exportSkeleton } from '@llm2d/export';
 import { Previewer, decodeImage, inspectImage, regionsImage, splitSheet } from '@llm2d/preview';
 import { regionTable, type Segmentation, type SplitReport } from '@llm2d/rig';
@@ -21,7 +21,7 @@ Workflow
 2. set_rig_spec: place bones by joint in art pixels ("from" = pivot, "to" = tip). Use "chains" for tails, hair, scarves, ears (only the root point is needed; bones follow the middle of the shape). In "parts", give each layer the bones that move it: one bone = rigid, several = a bending mesh with automatic weights. The reply overlays your bones on the art; check every pivot sits on the joint before building.
 3. build_rig: read the bend test. Fix errors (move joints, add a bone, lower "spacing" or raise "softness" for that part) before animating.
 4. describe_skeleton: bone names, setup angles, slots and attachments.
-5. Animate: apply_preset for standard motions (see list_presets), set_animation for custom keys. Build one animation from several presets with mode "merge" and "start".
+5. Animate: apply_preset for standard motions (see list_presets), set_animation for custom keys (mode "patch" to change only some timelines of an existing animation). Build one animation from several presets with mode "merge" and "start".
 6. After every change, look at the frames (the edit tools return a preview; render_animation for more detail) and fix what looks wrong: limbs hidden behind other layers, feet sliding or detaching, overshoot, loops that jump.
 7. validate_project, then export_project into the game's assets.
 A person may fine-tune animations in the timeline editor (pnpm editor <dir>), which saves the same animations.json: read animations again (get_animation) before changing them.
@@ -527,13 +527,22 @@ export function createServer() {
     {
       title: 'Set animation',
       description:
-        'Creates or replaces one animation with your own keys (full JSON). Errors name the exact key to fix. Returns a preview.',
-      input: { dir: dirArg, name: z.string(), animation: animationSchema, preview: z.boolean().default(true) },
+        'Creates or replaces one animation with your own keys. mode "replace" (default) writes the whole animation; ' +
+        'mode "patch" changes only what you send: each bone/slot/IK channel you list replaces that timeline ([] deletes it), "events" replaces the events, "duration" the duration, and everything else is kept. ' +
+        'Errors name the exact key to fix. Returns a preview.',
+      input: {
+        dir: dirArg,
+        name: z.string(),
+        animation: animationSchema,
+        mode: z.enum(['replace', 'patch']).default('replace'),
+        preview: z.boolean().default(true),
+      },
     },
     async (a) => {
       const project = new Project(a.dir);
       const animations = await project.readAnimations();
-      animations[a.name] = a.animation as L2DAnimation;
+      if (a.mode === 'patch' && !animations[a.name]) throw new Error(`No animation "${a.name}" to patch. Use mode "replace" to create it.`);
+      animations[a.name] = a.mode === 'patch' ? patchAnimation(animations[a.name], a.animation as L2DAnimation) : (a.animation as L2DAnimation);
       const result = await project.writeAnimations(animations);
       if (!result.ok) throw new Error(`Not saved. Fix these:\n${result.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
       const warn = result.warnings.filter((w) => w.path.startsWith(`animations.${a.name}`));

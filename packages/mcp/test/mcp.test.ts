@@ -99,6 +99,15 @@ describe('llm2d MCP server', () => {
     expect(Object.keys(idle.bones).sort()).toEqual(['hip', 'tail1', 'tail2', 'tail3', 'tail4']);
     expect(idle.slots.eyes.attachment).toHaveLength(2);
 
+    // Patch only the tail of idle: the other timelines stay.
+    const patched = await call('set_animation', { dir, name: 'idle', mode: 'patch', animation: { bones: { tail4: { rotate: [{ time: 0, value: 5 }, { time: 1, value: -5 }] }, tail3: { rotate: [] } } }, preview: false });
+    expect(patched.isError, patched.text).toBeFalsy();
+    const after = JSON.parse((await call('get_animation', { dir, name: 'idle' })).text);
+    expect(Object.keys(after.bones).sort()).toEqual(['hip', 'tail1', 'tail2', 'tail4']);
+    expect(after.bones.tail4.rotate).toHaveLength(2);
+    expect(after.slots.eyes.attachment).toHaveLength(2);
+    expect((await call('set_animation', { dir, name: 'nope', mode: 'patch', animation: {}, preview: false })).isError).toBe(true);
+
     const valid = await call('validate_project', { dir });
     expect(valid.text).toContain('Skeleton is valid');
     const out = join(dir, '..', 'game');
