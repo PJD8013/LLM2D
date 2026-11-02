@@ -82,8 +82,8 @@ claude
 | `list_presets` | 모션 프리셋 목록과 매개변수 |
 | `apply_preset` | 프리셋으로 키 생성. `merge`(기본)는 프리셋이 쓰는 타임라인을 그 첫 키 시간부터 바꾸고 앞쪽 키와 나머지는 유지하므로, 같은 프리셋을 다시 적용하면 바뀌고 `start`로 이어 붙이면 쌓임. 미리보기 반환 |
 | `set_animation` / `get_animation` / `delete_animation` | 애니메이션 JSON 직접 편집. `mode: "patch"`면 보낸 타임라인만 바꾸고 나머지는 유지(`[]`는 그 타임라인 삭제). 오류는 고칠 키 위치를 정확히 알려 줌 |
-| `render_animation` | 애니메이션 프레임 모음 이미지(디버그 표시 가능) |
-| `render_frame` | 특정 시간의 큰 프레임 한 장 또는 셋업 포즈 |
+| `render_animation` | 애니메이션 프레임 모음 이미지(디버그 표시 가능). 모든 칸이 같은 배율이고, 점프·팔 뻗기처럼 셋업 포즈 밖으로 나가는 움직임까지 다 들어오게 맞춤 |
+| `render_frame` | 특정 시간의 큰 프레임 한 장(같은 애니메이션이면 `render_animation`과 같은 맞춤) 또는 셋업 포즈 |
 | `validate_project` | 파일·이미지 검증 + 구부림 테스트 요약 |
 | `export_project` | 게임용으로 내보내기: 줄인 `.l2d.json` + 아틀라스 페이지(`scale`로 모바일용 축소) |
 

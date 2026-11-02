@@ -14,13 +14,14 @@
  *   --bg <dark|light|checker>
  *   --debug          draw bones, meshes and IK targets
  *   --bend           render the bend test poses instead of animations (--stress adds extreme poses)
- *   --out <dir>      output folder (default out/renders)
+ *   --out <dir>      output folder (default out/renders in the repository)
  */
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { SkeletonData, bendPoses } from '../packages/core/src/index.ts';
 import { Previewer, closeBrowser } from '../packages/preview/src/index.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,15 +35,21 @@ const { values } = parseArgs({
     debug: { type: 'boolean', default: false },
     bend: { type: 'boolean', default: false },
     stress: { type: 'boolean', default: false },
-    out: { type: 'string', default: 'out/renders' },
+    out: { type: 'string' },
   },
 });
 
 const files = (values.file ?? ['bolt/bolt.l2d.json', 'gem/gem.l2d.json', 'kit/kit.l2d.json', 'coin/coin.l2d.json']).map((f) =>
   existsSync(f) ? f : join(root, 'samples', f),
 );
-const outDir = join(root, values.out!);
+const outDir = values.out ? resolve(values.out) : join(root, 'out/renders');
 await mkdir(outDir, { recursive: true });
+const write = async (name: string, png: Buffer) => {
+  const path = join(outDir, name);
+  await writeFile(path, png);
+  const rel = relative(process.cwd(), path);
+  console.log(`wrote ${rel.startsWith('..') ? path : rel}`);
+};
 const background = values.bg as 'dark' | 'light' | 'checker';
 const cell = Number(values.cell);
 
@@ -51,17 +58,20 @@ try {
   for (const path of files) {
     const file = await previewer.loadFile(path);
     if (values.bend) {
+      if (!bendPoses(SkeletonData.fromJSON(file)).length) console.log(`${file.name}: no mesh bends with its bones; nothing to bend-test`);
       const png = await previewer.bendSheet({ cell, stress: values.stress, debug: values.debug, background });
-      const name = `${file.name}-bend${values.stress ? '-stress' : ''}${values.debug ? '-debug' : ''}.png`;
-      await writeFile(join(outDir, name), png);
-      console.log(`wrote ${join(values.out!, name)}`);
+      await write(`${file.name}-bend${values.stress ? '-stress' : ''}${values.debug ? '-debug' : ''}.png`, png);
       continue;
     }
-    for (const anim of values.anim ?? Object.keys(file.animations)) {
+    const names = Object.keys(file.animations ?? {});
+    for (const anim of values.anim ?? names) {
+      if (!names.includes(anim)) {
+        console.error(`${file.name}: no animation "${anim}" (has ${names.join(', ') || 'none'})`);
+        process.exitCode = 1;
+        continue;
+      }
       const png = await previewer.contactSheet(anim, { frames: Number(values.frames), cell, debug: values.debug, background });
-      const name = `${file.name}-${anim}${values.debug ? '-debug' : ''}.png`;
-      await writeFile(join(outDir, name), png);
-      console.log(`wrote ${join(values.out!, name)}`);
+      await write(`${file.name}-${anim}${values.debug ? '-debug' : ''}.png`, png);
     }
   }
 } finally {

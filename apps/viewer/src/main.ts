@@ -67,14 +67,50 @@ function logEvent(text: string, user = false) {
   while (ui.events.children.length > 40) ui.events.lastElementChild?.remove();
 }
 
-function fit() {
+interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Centres `bounds` (default: the setup pose) in the stage, filling `fill` of it. */
+function fit(bounds?: Bounds, fill = 0.8) {
   if (!actor) return;
-  const b = actor.data.bounds;
+  const b = bounds ?? actor.data.bounds;
   const w = app.renderer.width / app.renderer.resolution;
   const h = app.renderer.height / app.renderer.resolution;
-  const s = Math.min((w * 0.8) / Math.max(1, b.width), (h * 0.8) / Math.max(1, b.height)) * zoom;
+  const s = Math.min((w * fill) / Math.max(1, b.width), (h * fill) / Math.max(1, b.height)) * zoom;
   view.scale.set(s);
   view.position.set(w / 2 - (b.x + b.width / 2) * s + pan.x, h / 2 - (b.y + b.height / 2) * s + pan.y);
+}
+
+/**
+ * Skeleton-space bounds of everything an animation draws over its whole length (visible
+ * attachments, clipping shapes left out), so frames of a jump or a win burst are not cut off.
+ */
+function motionBounds(name: string): Bounds {
+  const a = actor!;
+  const anim = a.data.animations.get(name);
+  if (!anim) return a.data.bounds;
+  const buf = new Float32Array(Math.max(8, ...a.data.attachments.flat().map((m) => m.vertexCount * 2)));
+  let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
+  const samples = Math.min(90, Math.max(2, Math.ceil(anim.duration * 30) + 1));
+  for (let i = 0; i < samples; i++) {
+    seek(name, (anim.duration * i) / (samples - 1));
+    for (let slot = 0; slot < a.data.slots.length; slot++) {
+      const index = a.skeleton.attachments[slot];
+      if (index < 0 || a.data.attachments[slot][index].kind === 'clipping' || a.skeleton.slotColor(slot)[3] <= 0.01) continue;
+      const n = a.skeleton.computeSlotVertices(slot, buf);
+      for (let k = 0; k < n * 2; k += 2) {
+        minX = Math.min(minX, buf[k]);
+        maxX = Math.max(maxX, buf[k]);
+        minY = Math.min(minY, buf[k + 1]);
+        maxY = Math.max(maxY, buf[k + 1]);
+      }
+    }
+  }
+  return Number.isFinite(minX) ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : a.data.bounds;
 }
 
 function setActor(loaded: LoadedLlm2d, label: string) {
@@ -230,7 +266,7 @@ ui.stage.addEventListener('dblclick', () => {
   pan = { x: 0, y: 0 };
   fit();
 });
-app.renderer.on('resize', fit);
+app.renderer.on('resize', () => fit());
 
 app.ticker.add((ticker) => {
   if (!actor) return;
@@ -265,6 +301,10 @@ async function contactSheet(name: string, frames = 8, cell = 256, columns = 4): 
   sheet.width = cell * columns;
   sheet.height = cell * rows;
   const ctx = sheet.getContext('2d')!;
+  ctx.fillStyle = backgroundColor();
+  ctx.fillRect(0, 0, sheet.width, sheet.height);
+  // Same framing in every cell, wide enough for the whole motion.
+  fit(motionBounds(name), 0.9);
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : (anim.duration * i) / (frames - 1);
     seek(name, t);
@@ -278,6 +318,7 @@ async function contactSheet(name: string, frames = 8, cell = 256, columns = 4): 
     ctx.drawImage(src, x + (cell - src.width * s) / 2, y + (cell - src.height * s) / 2, src.width * s, src.height * s);
     drawLabel(ctx, `${name} ${t.toFixed(2)}s`, x, y, cell);
   }
+  fit();
   return sheet.toDataURL('image/png');
 }
 
@@ -307,6 +348,15 @@ async function bendSheet(cell = 220, stress = false): Promise<string> {
   sheet.width = cell * columns;
   sheet.height = cell * Math.max(1, controls.length);
   const ctx = sheet.getContext('2d')!;
+  ctx.fillStyle = backgroundColor();
+  ctx.fillRect(0, 0, sheet.width, sheet.height);
+  if (!controls.length) {
+    ctx.font = '600 14px system-ui, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('No mesh bends with these bones:', 12, cell / 2 - 10);
+    ctx.fillText('nothing to bend-test.', 12, cell / 2 + 10);
+    return sheet.toDataURL('image/png');
+  }
   const w = app.renderer.width / app.renderer.resolution;
   const h = app.renderer.height / app.renderer.resolution;
   const buf = new Float32Array(8192);
@@ -399,15 +449,16 @@ async function loadData(json: unknown, pages: Record<string, string>, label = 'd
   }
   for (const t of ownedTextures) t.destroy(true);
   ownedTextures = fresh;
-  setPlaying(false);
   return api.info();
 }
 
 /** One frame (setup pose when `name` is null) composited on the background, as a PNG data URL. */
 function frame(name: string | null, time = 0): string {
   if (!actor) throw new Error('No skeleton loaded');
-  if (name) seek(name, time);
-  else {
+  if (name) {
+    fit(motionBounds(name), 0.9);
+    seek(name, time);
+  } else {
     setPlaying(false);
     actor.state.clearTracks();
     actor.skeleton.setToSetupPose();
@@ -422,6 +473,7 @@ function frame(name: string | null, time = 0): string {
   ctx.fillStyle = backgroundColor();
   ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(src, 0, 0);
+  if (name) fit();
   return out.toDataURL('image/png');
 }
 

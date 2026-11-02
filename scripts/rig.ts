@@ -6,6 +6,7 @@
  *       layer boxes (plus the spec's bones if given), for picking joint positions.
  *
  *   pnpm rig build <art.psd> --spec rig.json [--animations animations.json|.ts] --out samples/kit
+ *   (a .ts module exports `animations` or a default object)
  *       Builds <out>/<name>.l2d.json and <out>/images/, prints the part report and runs the
  *       bend test. Exits with code 1 if the bend test finds errors (override with --allow-errors).
  */
@@ -50,12 +51,15 @@ if (command === 'inspect') {
 } else {
   if (!spec) throw new Error('--spec is required for build');
   const outDir = values.out ?? join('samples', name);
-  // Animations: a JSON object of { name: animation }, or a .ts/.js module exporting `animations`.
-  const animations = !values.animations
-    ? {}
-    : /\.(ts|js|mjs)$/.test(values.animations)
-      ? (await import(pathToFileURL(resolve(values.animations)).href)).animations
-      : JSON.parse(await readFile(values.animations, 'utf8'));
+  // Animations: a JSON object of { name: animation }, or a .ts/.js module exporting `animations`
+  // (or exporting them as default).
+  let animations = {};
+  if (values.animations && /\.(ts|js|mjs)$/.test(values.animations)) {
+    const mod = await import(pathToFileURL(resolve(values.animations)).href);
+    animations = mod.animations ?? mod.default;
+    if (!animations || typeof animations !== 'object')
+      throw new Error(`${values.animations} exports neither "animations" nor a default object of animations`);
+  } else if (values.animations) animations = JSON.parse(await readFile(values.animations, 'utf8'));
   const result = buildRig(art, spec, animations);
   await mkdir(join(outDir, 'images'), { recursive: true });
   for (const [img, png] of Object.entries(result.images)) await writeFile(join(outDir, 'images', `${img}.png`), png);
