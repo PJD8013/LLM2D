@@ -94,7 +94,10 @@ export interface L2DMeshAttachment {
   uvs: number[];
   /** Flat triangle vertex indices. */
   triangles: number[];
-  /** Number of vertices (from the start of the list) that form the outer hull. Informational. */
+  /**
+   * Number of vertices (from the start of the list) on the outline, of every piece when the
+   * art has several. Informational.
+   */
   hull?: number;
   /**
    * Bones that deform this mesh. If omitted, the whole mesh follows the slot's bone.

@@ -10,8 +10,10 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
   like spine's event queue). No DOM, runs in Node.
 - `packages/pixi` — `Llm2dActor` (PixiJS 8 `Mesh` per slot, CPU skinning; clipping ranges as containers with a
   Graphics mask) and `loadLlm2d`.
-- `packages/rig` — Node-only auto-rigging: `readPsd`, contour + constrained Delaunay `buildMesh`,
-  medial-axis `chainJoints`, geodesic `computeWeights`, `buildRig(art, spec)`. `bendTest`/`bendPoses`
+- `packages/rig` — Node-only auto-rigging: `readPsd`, contour + constrained Delaunay `buildMesh` (one outline
+  per piece), medial-axis `chainJoints` (piece under `start`), geodesic `computeWeights` (bones seed only
+  vertices they see over the art), `buildRig(art, spec)` (spec keys are layer names as shown, any script;
+  slot ids replace spaces and symbols with `_`). `bendTest`/`bendPoses`
   live in core so the viewer can use them. Flat pictures: `segment.ts` (`removeBackground`, `segmentArt`:
   median + Felzenszwalb graph segmentation, outline strokes as label -1, neck splitting, broad soft areas
   such as glows as regions) and `split.ts` (`splitArt`: parts back to front from region ids/points/polygons/
