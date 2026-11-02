@@ -31,7 +31,8 @@ Conventions
 - Bone keys are relative to the setup pose: rotate and translate are added, scale multiplies. Slot color/alpha keys are absolute.
 - A key's "curve" shapes the motion to the next key: "linear", "stepped", easings.net names such as "easeOutBack", or [x1, y1, x2, y2].
 - Loops must end where they start. Symbols usually need "idle", "land" and "win"; characters "idle" plus actions.
-- IK legs: when the hip moves up, move the foot target bones up with the same timing, or the legs come apart.`;
+- IK legs: when the hip moves up, move the foot target bones up with the same timing, or the legs come apart.
+- A shine or light streak that crosses a symbol: give its layer "clip": "<symbol layer>" in parts (it is drawn only inside the symbol) and animate it with the shine_sweep preset.`;
 
 const pt = z.tuple([z.number(), z.number()]);
 
@@ -77,6 +78,10 @@ const specSchema = z.object({
         blend: z.enum(['normal', 'add', 'multiply', 'screen']).optional(),
         alpha: z.number().min(0).max(1).optional().describe('Opacity at setup pose. Use 0 for glows/flashes/sparkles that animations fade in.'),
         skip: z.boolean().optional().describe('Leave the layer out.'),
+        clip: z
+          .string()
+          .optional()
+          .describe('Draw this layer only inside the outline of that layer, e.g. a shine sweeping across a coin: "clip": "coin". Animate the shine bone across with the shine_sweep preset.'),
       }),
     )
     .optional()
@@ -458,7 +463,9 @@ export function createServer() {
       }
       lines.push('Slots (draw order, back to front):');
       for (const s of data.slots) {
-        const atts = data.attachments[s.index].map((m) => `${m.name}${m.kind === 'mesh' ? ' (mesh)' : ''}`);
+        const atts = data.attachments[s.index].map(
+          (m) => `${m.name}${m.kind === 'mesh' ? ' (mesh)' : m.kind === 'clipping' ? ` (clipping: slots after it up to ${data.slots[m.clipEnd]?.name} are drawn only inside it)` : ''}`,
+        );
         lines.push(`  ${s.name} on ${data.bones[s.bone].name}: ${atts.join(', ')}; shows ${s.attachment >= 0 ? data.attachments[s.index][s.attachment].name : 'nothing'}${s.blend !== 'normal' ? `; blend ${s.blend}` : ''}`);
       }
       if (data.ik.length) {

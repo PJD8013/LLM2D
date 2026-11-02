@@ -23,6 +23,7 @@ const gemParams: Record<string, Record<string, unknown>> = {
   big_win_title: { slots: ['gem'] },
   pop_in: { slots: ['gem'] },
   fade: { slots: ['glow'], from: 0, to: 1 },
+  shine_sweep: { bone: 'sparkle' },
 };
 
 function withAnimation(file: L2DFile, name: string, anim: L2DAnimation): L2DFile {
@@ -83,6 +84,19 @@ describe('presets', () => {
     expect(Object.keys(anim.bones!)).toEqual(['gem']);
     expect(anim.bones!.gem.translate![0].time).toBe(0.5);
     expect(anim.events![0]).toMatchObject({ name: 'land', time: 0.62 });
+  });
+
+  it('sweeps a shine from just outside one side of the symbol to just outside the other', () => {
+    const data = SkeletonData.fromJSON(load('coin'));
+    const anim = applyPreset(data, 'shine_sweep', { bone: 'shine' });
+    const [start, end, back] = anim.bones!.shine.translate!;
+    const shine = data.attachments[data.findSlot('shine')][0].vertices;
+    const xs = [...shine].filter((_, i) => i % 2 === 0);
+    const b = data.bounds;
+    expect(Math.max(...xs) + start.x!).toBeCloseTo(b.x, 0);
+    expect(Math.min(...xs) + end.x!).toBeCloseTo(b.x + b.width, 0);
+    expect([end.time, end.curve, back.time, back.x]).toEqual([0.6, 'stepped', 1.6, start.x]);
+    expect(() => applyPreset(data, 'shine_sweep', {})).toThrow(/needs "bone"/);
   });
 
   it('raises arms outward on both sides', () => {

@@ -23,6 +23,14 @@ interface BoneFollower {
   object: Container;
 }
 
+/** A clipping slot: the meshes of the slots it clips sit in `container`, masked by `mask`. */
+interface Clip {
+  container: Container;
+  mask: Graphics;
+  on: boolean;
+  points: Float32Array;
+}
+
 const BLENDS = { normal: 'normal', add: 'add', multiply: 'multiply', screen: 'screen' } as const;
 
 /**
@@ -36,8 +44,10 @@ export class Llm2dActor extends Container {
   readonly data: SkeletonData;
 
   private readonly meshes: Mesh[] = [];
-  /** geometries[slot][attachment] */
-  private readonly geometries: MeshGeometry[][] = [];
+  /** geometries[slot][attachment] (null for clipping polygons, which draw nothing) */
+  private readonly geometries: (MeshGeometry | null)[][] = [];
+  /** Per slot: its clipping range, if the slot has clipping attachments. */
+  private readonly clips: (Clip | null)[] = [];
   /** Stand-in geometries of slots without attachments. */
   private readonly placeholders: MeshGeometry[] = [];
   /** state.version when the pose was last applied. */
@@ -60,18 +70,23 @@ export class Llm2dActor extends Container {
     this.state = new AnimationState(data);
     this.shownAttachment = new Int16Array(data.slots.length).fill(-2);
 
+    // Slots inside a clipping range are drawn in that range's masked container.
+    let parent: Container = this;
+    let rangeEnd = -1;
     for (const slot of data.slots) {
-      const geoms = data.attachments[slot.index].map(
-        (a) =>
-          new MeshGeometry({
-            positions: new Float32Array(a.vertices),
-            uvs: new Float32Array(a.uvs),
-            indices: new Uint32Array(a.triangles),
-          }),
+      const list = data.attachments[slot.index];
+      const geoms = list.map((a) =>
+        a.kind === 'clipping'
+          ? null
+          : new MeshGeometry({
+              positions: new Float32Array(a.vertices),
+              uvs: new Float32Array(a.uvs),
+              indices: new Uint32Array(a.triangles),
+            }),
       );
       this.geometries.push(geoms);
-      const first = data.attachments[slot.index][0];
-      let geometry = geoms[0];
+      const first = list.find((a) => a.kind !== 'clipping');
+      let geometry = geoms.find((g) => g !== null) ?? undefined;
       if (!geometry) {
         geometry = new MeshGeometry({ positions: new Float32Array(6), uvs: new Float32Array(6), indices: new Uint32Array([0, 1, 2]) });
         this.placeholders.push(geometry);
@@ -83,7 +98,24 @@ export class Llm2dActor extends Container {
       });
       mesh.blendMode = BLENDS[slot.blend];
       this.meshes.push(mesh);
-      this.addChild(mesh);
+      parent.addChild(mesh);
+      if (slot.index === rangeEnd) {
+        parent = this;
+        rangeEnd = -1;
+      }
+      const clipping = list.filter((a) => a.kind === 'clipping');
+      if (clipping.length && parent === this) {
+        const clip: Clip = {
+          container: new Container({ label: `clip:${slot.name}` }),
+          mask: new Graphics({ label: `clip-mask:${slot.name}` }),
+          on: false,
+          points: new Float32Array(Math.max(...clipping.map((a) => a.vertexCount)) * 2),
+        };
+        this.addChild(clip.mask, clip.container);
+        this.clips.push(clip);
+        parent = clip.container;
+        rangeEnd = Math.max(...clipping.map((a) => a.clipEnd));
+      } else this.clips.push(null);
     }
     this.addChild(this.followerLayer);
     this.autoUpdate = autoUpdate;
@@ -134,11 +166,24 @@ export class Llm2dActor extends Container {
     for (let s = 0; s < this.meshes.length; s++) {
       const mesh = this.meshes[s];
       const a = sk.attachments[s];
+      const clip = this.clips[s];
       if (a < 0) {
         mesh.visible = false;
+        if (clip) this.setClip(clip, false);
         continue;
       }
       const geometry = this.geometries[s][a];
+      if (!geometry) {
+        // A clipping polygon: draws nothing, masks the slots of its range.
+        mesh.visible = false;
+        if (clip) {
+          const n = sk.computeSlotVertices(s, clip.points);
+          clip.mask.clear().poly(Array.from(clip.points.subarray(0, n * 2)), true).fill({ color: 0xffffff });
+          this.setClip(clip, true);
+        }
+        continue;
+      }
+      if (clip) this.setClip(clip, false);
       if (this.shownAttachment[s] !== a) {
         this.shownAttachment[s] = a;
         mesh.geometry = geometry;
@@ -157,6 +202,14 @@ export class Llm2dActor extends Container {
       f.object.setFromMatrix(this.tmpMatrix);
     }
     if (this.debugGraphics) this.drawDebug();
+  }
+
+  private setClip(clip: Clip, on: boolean): void {
+    if (on === clip.on) return;
+    clip.on = on;
+    clip.container.mask = on ? clip.mask : null;
+    // Unused as a mask, the graphics would draw: keep it empty.
+    if (!on) clip.mask.clear();
   }
 
   /**
@@ -217,6 +270,10 @@ export class Llm2dActor extends Container {
         const mesh = this.data.attachments[s][a];
         const v = mesh.vertexCount * 2 > tmp.length ? new Float32Array(mesh.vertexCount * 2) : tmp;
         sk.computeSlotVertices(s, v);
+        if (mesh.kind === 'clipping') {
+          g.poly(Array.from(v.subarray(0, mesh.vertexCount * 2)), true).stroke({ width: 2 * scale, color: 0xff4fd8, alpha: 0.9 });
+          continue;
+        }
         const t = mesh.triangles;
         for (let i = 0; i < t.length; i += 3) {
           g.moveTo(v[t[i] * 2], v[t[i] * 2 + 1])
@@ -259,7 +316,14 @@ export class Llm2dActor extends Container {
     const children = typeof options === 'boolean' ? options : !!options?.children;
     for (const mesh of this.meshes) mesh.destroy();
     this.meshes.length = 0;
-    for (const list of this.geometries) for (const geom of list) geom.destroy(true);
+    for (const clip of this.clips) {
+      if (!clip) continue;
+      clip.container.mask = null;
+      clip.container.destroy();
+      clip.mask.destroy();
+    }
+    this.clips.length = 0;
+    for (const list of this.geometries) for (const geom of list) geom?.destroy(true);
     for (const geom of this.placeholders) geom.destroy(true);
     this.debugGraphics?.destroy();
     this.debugGraphics = null;

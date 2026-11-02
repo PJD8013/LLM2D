@@ -116,6 +116,7 @@ export function validate(input: unknown): ValidationResult {
     });
 
   // Attachments
+  const clipRanges = new Map<number, { end: number; path: string }>();
   if (!isObj(f.attachments)) err('attachments', 'Must be an object: { slotName: { attachmentName: {...} } }');
   else
     for (const [slotName, group] of Object.entries(f.attachments)) {
@@ -134,16 +135,37 @@ export function validate(input: unknown): ValidationResult {
           err(p, 'Must be an object');
           continue;
         }
-        if (!isStr(a.image) || !images.has(a.image)) err(`${p}.image`, `Unknown image "${String(a.image)}"`);
-        if (a.type === 'region') {
+        if (a.type !== 'clipping' && (!isStr(a.image) || !images.has(a.image))) err(`${p}.image`, `Unknown image "${String(a.image)}"`);
+        if (a.type === 'clipping') {
+          validateClipping(a, p, boneIndex, err, warn);
+          const own = slotIndex.get(slotName);
+          if (a.end !== undefined) {
+            const end = isStr(a.end) ? slotIndex.get(a.end) : undefined;
+            if (end === undefined) err(`${p}.end`, `Unknown slot "${String(a.end)}"`);
+            else if (own !== undefined && end <= own) err(`${p}.end`, `Must be a slot after "${slotName}" in draw order`);
+          }
+          if (own !== undefined) {
+            const end = isStr(a.end) && slotIndex.has(a.end) ? slotIndex.get(a.end)! : Array.isArray(f.slots) ? f.slots.length - 1 : own;
+            const prev = clipRanges.get(own);
+            if (prev && prev.end !== end) err(`${p}.end`, `Every clipping attachment of slot "${slotName}" must clip up to the same slot`);
+            clipRanges.set(own, { end, path: p });
+          }
+        } else if (a.type === 'region') {
           for (const k of ['x', 'y'] as const) if (!isNum(a[k])) err(`${p}.${k}`, 'Must be a finite number');
           for (const k of ['rotation', 'scaleX', 'scaleY', 'width', 'height'] as const)
             if (a[k] !== undefined && !isNum(a[k])) err(`${p}.${k}`, 'Must be a finite number');
         } else if (a.type === 'mesh') {
           validateMesh(a, p, boneIndex, err, warn);
-        } else err(`${p}.type`, 'Must be "region" or "mesh"');
+        } else err(`${p}.type`, 'Must be "region", "mesh" or "clipping"');
       }
     }
+  // Clipping ranges (slot after the clipping slot .. end) may not overlap.
+  {
+    const ranges = [...clipRanges].sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < ranges.length; i++)
+      if (ranges[i][0] <= ranges[i - 1][1].end)
+        err(ranges[i][1].path, `Clipping ranges overlap: this clipping slot is inside the range clipped by ${ranges[i - 1][1].path}`);
+  }
 
   if (Array.isArray(f.slots))
     f.slots.forEach((s, i) => {
@@ -296,6 +318,35 @@ function validateMesh(
   if (a.hull !== undefined && (!Number.isInteger(a.hull) || (a.hull as number) < 3 || (a.hull as number) > n))
     err(`${p}.hull`, `Must be an integer between 3 and ${n}`);
 
+  validateInfluences(a, p, n, boneIndex, err, warn);
+}
+
+/** A clipping polygon: vertices plus optional bones/weights like a mesh. */
+function validateClipping(
+  a: Obj,
+  p: string,
+  boneIndex: Map<string, number>,
+  err: (p: string, m: string) => void,
+  warn: (p: string, m: string) => void,
+) {
+  const nums = (v: unknown): v is number[] => Array.isArray(v) && v.every(isNum);
+  if (!nums(a.vertices) || a.vertices.length < 6 || a.vertices.length % 2) {
+    err(`${p}.vertices`, 'Must be a flat [x, y, ...] polygon with at least 3 points');
+    return;
+  }
+  validateInfluences(a, p, a.vertices.length / 2, boneIndex, err, warn);
+}
+
+/** `bones` and per-vertex `weights` of a mesh or clipping polygon with `n` vertices. */
+function validateInfluences(
+  a: Obj,
+  p: string,
+  n: number,
+  boneIndex: Map<string, number>,
+  err: (p: string, m: string) => void,
+  warn: (p: string, m: string) => void,
+) {
+  const nums = (v: unknown): v is number[] => Array.isArray(v) && v.every(isNum);
   const bones = a.bones;
   if (bones !== undefined) {
     if (!Array.isArray(bones) || bones.length === 0) err(`${p}.bones`, 'Must be a non-empty list of bone names');

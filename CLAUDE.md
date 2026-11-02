@@ -8,7 +8,8 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 - `packages/core` — format types, validator, compiled `SkeletonData`, `Skeleton` (world transforms,
   IK, skinning), `AnimationState` (tracks, mixing, queue, events; listeners run after the state change,
   like spine's event queue). No DOM, runs in Node.
-- `packages/pixi` — `Llm2dActor` (PixiJS 8 `Mesh` per slot, CPU skinning) and `loadLlm2d`.
+- `packages/pixi` — `Llm2dActor` (PixiJS 8 `Mesh` per slot, CPU skinning; clipping ranges as containers with a
+  Graphics mask) and `loadLlm2d`.
 - `packages/rig` — Node-only auto-rigging: `readPsd`, contour + constrained Delaunay `buildMesh`,
   medial-axis `chainJoints`, geodesic `computeWeights`, `buildRig(art, spec)`. `bendTest`/`bendPoses`
   live in core so the viewer can use them. Flat pictures: `segment.ts` (`removeBackground`, `segmentArt`:

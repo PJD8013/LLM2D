@@ -146,6 +146,64 @@ export const PRESETS: Preset[] = [
     },
   },
   {
+    name: 'shine_sweep',
+    category: 'symbol',
+    loops: true,
+    description:
+      'A light streak sweeps across the symbol, then rests out of sight until the loop starts again. Clip the shine layer to the symbol (rig.json parts.<shine>.clip) so only the part over the symbol shows.',
+    params: [
+      { name: 'bone', type: 'bone', required: true, description: 'Bone of the shine layer; it is moved across.' },
+      { name: 'distance', type: 'number', description: 'Travel to each side of the setup position, in skeleton units. Default: from just outside the symbol on one side to just outside on the other.' },
+      { name: 'angle', type: 'number', default: 0, description: 'Direction of travel in degrees (0 = left to right, 90 = top to bottom).' },
+      { name: 'sweep', type: 'number', default: 0.6, description: 'Seconds the streak takes to cross.' },
+      { name: 'duration', type: 'number', default: 1.6, description: 'Seconds per loop (the time after the sweep is a pause).' },
+      START,
+    ],
+    build: (ctx, p) => {
+      const a = (p.angle * Math.PI) / 180;
+      const ux = Math.cos(a);
+      const uy = Math.sin(a);
+      let from = -(p.distance ?? 0);
+      let to = p.distance ?? 0;
+      if (p.distance === undefined) {
+        // Along the direction: the shine's own extent and the symbol's (setup pose).
+        const data = ctx.data;
+        const bone = data.findBone(p.bone);
+        let sMin = Infinity;
+        let sMax = -Infinity;
+        for (const slot of data.slots) {
+          if (slot.bone !== bone || slot.attachment < 0) continue;
+          const v = data.attachments[slot.index][slot.attachment].vertices;
+          for (let i = 0; i < v.length; i += 2) {
+            const t = v[i] * ux + v[i + 1] * uy;
+            sMin = Math.min(sMin, t);
+            sMax = Math.max(sMax, t);
+          }
+        }
+        const b = data.bounds;
+        const corners = [b.x * ux + b.y * uy, (b.x + b.width) * ux + b.y * uy, b.x * ux + (b.y + b.height) * uy, (b.x + b.width) * ux + (b.y + b.height) * uy];
+        if (sMin === Infinity) [sMin, sMax] = [0, 0];
+        from = Math.min(...corners) - sMax;
+        to = Math.max(...corners) - sMin;
+      }
+      const across = r3(Math.min(p.sweep, p.duration));
+      const at = (t: number) => ({ x: r3(ux * t), y: r3(uy * t) });
+      return {
+        duration: r3(p.duration),
+        bones: {
+          [p.bone]: {
+            translate: [
+              { time: 0, ...at(from), curve: 'easeInOutSine' },
+              // Waits on the far side (clipped away), then jumps back unseen for the next loop.
+              { time: across, ...at(to), curve: 'stepped' },
+              { time: r3(p.duration), ...at(from) },
+            ],
+          },
+        },
+      };
+    },
+  },
+  {
     name: 'anticipation',
     category: 'symbol',
     loops: true,

@@ -69,7 +69,7 @@ export interface L2DSlot {
   blend?: BlendMode;
 }
 
-export type L2DAttachment = L2DRegionAttachment | L2DMeshAttachment;
+export type L2DAttachment = L2DRegionAttachment | L2DMeshAttachment | L2DClippingAttachment;
 
 export interface L2DRegionAttachment {
   type: 'region';
@@ -104,6 +104,24 @@ export interface L2DMeshAttachment {
    * Per-vertex influences as flat pairs [boneIndex, weight, boneIndex, weight, ...],
    * where boneIndex indexes into `bones`. Weights of a vertex should sum to 1.
    */
+  weights?: number[][];
+}
+
+/**
+ * A clipping polygon: the slots after this one in draw order, up to and including `end`, are
+ * drawn only inside it (e.g. a shine sweeping across a symbol, clipped to the symbol's shape).
+ * Draws nothing itself. Follows the slot's bone, or `bones`/`weights` like a mesh. Clipping
+ * ranges may not overlap.
+ */
+export interface L2DClippingAttachment {
+  type: 'clipping';
+  /** Polygon in skeleton space at setup pose: flat [x0, y0, x1, y1, ...], at least 3 points. */
+  vertices: number[];
+  /** Last slot clipped (inclusive). Default: the last slot. */
+  end?: string;
+  /** Bones that move the polygon (default: the slot's bone). */
+  bones?: string[];
+  /** Per-vertex influences like a mesh's: flat pairs [boneIndex, weight, ...]. */
   weights?: number[][];
 }
 

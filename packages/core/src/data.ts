@@ -1,6 +1,6 @@
 import { parseColor, type RGBA } from './color.ts';
 import { resolveCurve, type EaseFn } from './curves.ts';
-import type { BlendMode, L2DAnimation, L2DFile, L2DImage, L2DMeshAttachment, L2DRegionAttachment } from './format.ts';
+import type { BlendMode, L2DAnimation, L2DClippingAttachment, L2DFile, L2DImage, L2DMeshAttachment, L2DRegionAttachment } from './format.ts';
 import { compose, invert, mat, multiply, type Mat2D } from './math.ts';
 import { validate } from './validate.ts';
 
@@ -36,12 +36,18 @@ export interface SlotData {
   blend: BlendMode;
 }
 
-/** Every attachment is compiled to a mesh. Regions become 4-vertex quads. */
+/**
+ * Every attachment is compiled to a mesh. Regions become 4-vertex quads; a clipping polygon is a
+ * mesh without image or triangles whose vertices outline the clip.
+ */
 export interface MeshData {
   name: string;
   slot: number;
+  /** Image name ('' for a clipping polygon). */
   image: string;
-  kind: 'region' | 'mesh';
+  kind: 'region' | 'mesh' | 'clipping';
+  /** For a clipping polygon: the last slot it clips (inclusive); -1 otherwise. */
+  clipEnd: number;
   vertexCount: number;
   /** Skeleton-space positions at setup pose. */
   vertices: Float32Array;
@@ -255,7 +261,9 @@ export class SkeletonData {
         list.push(
           a.type === 'region'
             ? this.compileRegion(name, index, bone, a)
-            : this.compileMesh(name, index, bone, a),
+            : a.type === 'clipping'
+              ? this.compileClipping(name, index, bone, a, file.slots.map((x) => x.name))
+              : this.compileMesh(name, index, bone, a),
         );
       }
       this.attachmentByName.push(byName);
@@ -358,6 +366,7 @@ export class SkeletonData {
       slot,
       image: a.image,
       kind: 'region',
+      clipEnd: -1,
       vertexCount: 4,
       vertices,
       uvs: Float32Array.from([0, 0, 1, 0, 1, 1, 0, 1]),
@@ -368,6 +377,20 @@ export class SkeletonData {
       influenceWeight: Float32Array.from([1, 1, 1, 1]),
       rigidBone: bone,
     };
+  }
+
+  private compileClipping(name: string, slot: number, slotBone: number, a: L2DClippingAttachment, slotNames: string[]): MeshData {
+    const n = a.vertices.length / 2;
+    const mesh = this.compileMesh(name, slot, slotBone, {
+      type: 'mesh',
+      image: '',
+      vertices: a.vertices,
+      uvs: new Array(n * 2).fill(0),
+      triangles: [],
+      bones: a.bones,
+      weights: a.weights,
+    });
+    return { ...mesh, kind: 'clipping', clipEnd: a.end === undefined ? slotNames.length - 1 : slotNames.indexOf(a.end) };
   }
 
   private compileMesh(name: string, slot: number, slotBone: number, a: L2DMeshAttachment): MeshData {
@@ -405,6 +428,7 @@ export class SkeletonData {
       slot,
       image: a.image,
       kind: 'mesh',
+      clipEnd: -1,
       vertexCount: n,
       vertices: Float32Array.from(a.vertices),
       uvs: Float32Array.from(a.uvs),
@@ -491,9 +515,10 @@ export class SkeletonData {
       }
     };
     // Effects that start invisible (glows, flashes) should not inflate the framing...
-    for (const s of this.slots) if (s.attachment >= 0 && s.color.a > 0) add(this.attachments[s.index][s.attachment].vertices);
+    for (const s of this.slots)
+      if (s.attachment >= 0 && s.color.a > 0 && this.attachments[s.index][s.attachment].kind !== 'clipping') add(this.attachments[s.index][s.attachment].vertices);
     // ... unless everything starts invisible (a skeleton that fades in): then frame it all.
-    if (minX === Infinity) for (const list of this.attachments) for (const a of list) add(a.vertices);
+    if (minX === Infinity) for (const list of this.attachments) for (const a of list) if (a.kind !== 'clipping') add(a.vertices);
     if (minX === Infinity) return { x: 0, y: 0, width: 0, height: 0 };
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }

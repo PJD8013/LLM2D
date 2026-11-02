@@ -10,7 +10,8 @@ import {
 } from '@llm2d/core';
 import { bonesFromWorld, round, type WorldBone } from './bones.ts';
 import { chainJoints } from './chain.ts';
-import { distToSegment, type Pt } from './geometry.ts';
+import { components, traceBoundary } from './contour.ts';
+import { distToSegment, simplifyClosed, type Pt } from './geometry.ts';
 import { alphaMask, encodePng, trimLayer, type Layer } from './image.ts';
 import { buildMesh, thickness } from './mesh.ts';
 import type { LayeredArt } from './psd.ts';
@@ -73,6 +74,11 @@ export interface RigPart {
   alpha?: number;
   /** Leave the layer out. */
   skip?: boolean;
+  /**
+   * Draw this layer only inside the outline of another layer (a shine sweeping across a coin,
+   * clipped to the coin). Makes a clipping slot just below this one that follows that layer's bone.
+   */
+  clip?: string;
 }
 
 export interface PartReport {
@@ -255,6 +261,26 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
       triangles: triCount,
       hidden: layer.hidden,
     });
+  }
+
+  // Clipping: a slot just below each clipped part, holding the clip layer's outline.
+  for (const [layerName, part] of Object.entries(spec.parts ?? {})) {
+    if (!part.clip || part.skip) continue;
+    const own = parts.find((p) => p.layer === safeName(layerName));
+    if (!own) throw new Error(`Layer "${layerName}": "clip" is set, but the layer is not in the art`);
+    const clipLayer = layers.get(safeName(part.clip));
+    const clipPart = parts.find((p) => p.layer === safeName(part.clip!));
+    if (!clipLayer || !clipPart) throw new Error(`Layer "${layerName}": clip layer "${part.clip}" is not in the art`);
+    const slotIndex = slots.findIndex((sl) => sl.name === own.slot);
+    const clipSlot = `${own.slot}_clip`;
+    if (slots.some((sl) => sl.name === clipSlot)) continue; // alternate art of the same slot
+    const { width: w, height: h } = clipLayer.image;
+    const { labels, list } = components(alphaMask(clipLayer.image, 127), w, h);
+    if (!list.length) throw new Error(`Layer "${layerName}": clip layer "${part.clip}" is empty`);
+    const outline = simplifyClosed(traceBoundary(labels, w, h, list[0]), 1);
+    const vertices = outline.flatMap(([x, y]) => toSk(x + clipLayer.x, y + clipLayer.y));
+    slots.splice(slotIndex, 0, { name: clipSlot, bone: clipPart.bones[0], attachment: clipSlot });
+    attachments[clipSlot] = { [clipSlot]: { type: 'clipping', vertices, end: own.slot } };
   }
 
   const file: L2DFile = {

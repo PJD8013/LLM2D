@@ -82,6 +82,7 @@ pnpm rig inspect samples/kit/source/kit.psd
 | `smooth` | 가중치 다듬기 횟수. 기본 2 |
 | `blend` | `normal`, `add`, `multiply`, `screen` |
 | `alpha` | 셋업 포즈의 불투명도(0~1). 빛·번쩍임·반짝임처럼 애니메이션이 나타나게 할 레이어는 0. PSD에서 숨긴 레이어를 `parts`에 적으면(`slot` 없이) 기본 0인 효과 슬롯이 됨 |
+| `clip` | 이 레이어를 다른 레이어의 윤곽 안쪽에만 그림. 예: 코인 위를 지나가는 반짝임 `"shine": { "bone": "shine", "clip": "coin" }`. 바로 아래에 `<슬롯>_clip` 클리핑 슬롯이 생기고 그 레이어의 뼈를 따라감 |
 | `skip` | 이 레이어 제외 |
 
 `parts`에 없는 레이어는 자동으로 정합니다. 뼈가 레이어 그림을 지나가면 그 뼈들로 메시를

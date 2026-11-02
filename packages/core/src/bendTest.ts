@@ -73,7 +73,7 @@ export function bendPoses(data: SkeletonData, options: BendTestOptions = {}): Be
 
   const meshes = data.attachments.flatMap((list, slot) =>
     list
-      .map((mesh, index) => ({ slot, index, bones: new Set(mesh.influenceBone), weighted: mesh.rigidBone < 0 }))
+      .map((mesh, index) => ({ slot, index, bones: new Set(mesh.influenceBone), weighted: mesh.rigidBone < 0 && mesh.kind !== 'clipping' }))
       .filter((m) => m.weighted),
   );
   const subtree = data.bones.map((b) => {
@@ -234,7 +234,7 @@ export function bendTest(data: SkeletonData, options: BendTestOptions = {}): Ben
 
   const errors = issues.filter((i) => i.severity === 'error').length;
   const warnings = issues.length - errors;
-  const meshCount = data.attachments.flat().filter((m) => m.rigidBone < 0).length;
+  const meshCount = data.attachments.flat().filter((m) => m.rigidBone < 0 && m.kind !== 'clipping').length;
   const summary =
     `bend test: ${tested.size} control(s), ${meshCount} weighted mesh(es); ` +
     (issues.length ? `${errors} error(s), ${warnings} warning(s)` : 'clean');
