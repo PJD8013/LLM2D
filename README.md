@@ -32,10 +32,10 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
 | 구성 요소 | 위치 | 내용 |
 |---|---|---|
 | 평면 그림 자동 분리 | [`packages/rig`](packages/rig), [`docs/split.md`](docs/split.md) | 레이어 없는 그림 한 장(PNG/JPEG)을 부위별 레이어 PSD로. 배경 제거, 번호 붙은 색 영역, 외곽선은 앞 부위로, 빛 번짐·그림자는 반투명 레이어로, 가려진 곳 자동 복원(다시 겹치면 원본과 픽셀 단위로 같음) |
-| 자동 리깅 | [`packages/rig`](packages/rig), [`docs/rigging.md`](docs/rigging.md) | PSD 읽기 → 알파 윤곽으로 메시 생성 → 중심선 따라 체인 뼈 자동 배치 → 자동 가중치. 관절 좌표만 `rig.json`에 적으면 됨 |
+| 자동 리깅 | [`packages/rig`](packages/rig), [`docs/rigging.md`](docs/rigging.md) | PSD 읽기(레이어 마스크·클리핑 음영·그룹·16비트 반영) → 알파 윤곽으로 메시 생성 → 중심선 따라 체인 뼈 자동 배치 → 자동 가중치. 관절 좌표만 `rig.json`에 적으면 됨 |
 | 구부림 테스트 | [`packages/core/src/bendTest.ts`](packages/core/src/bendTest.ts) | 관절 회전, IK 웅크리기·흔들기로 메시가 접히거나 찢어지는지 자동 검사 |
 | Claude 연결 (MCP) | [`packages/mcp`](packages/mcp), [`docs/mcp.md`](docs/mcp.md) | Claude가 분리·리깅·애니메이션·렌더 확인·내보내기를 직접 하는 도구 18개. `.mcp.json`으로 Claude Code에 바로 연결 |
-| 모션 프리셋 | [`packages/motion`](packages/motion) | 심볼(idle, land, win, 기대감, 빅윈 타이틀)과 캐릭터(흔들림, 숨쉬기, 깜빡임, 말하기, 손 흔들기, 점프) 등 16종 |
+| 모션 프리셋 | [`packages/motion`](packages/motion) | 심볼(idle, land, win, 기대감, 빅윈 타이틀, 반짝임 지나가기)과 캐릭터(흔들림, 숨쉬기, 깜빡임, 말하기, 손 흔들기, 점프) 등 18종 |
 | 타임라인 편집기 | [`apps/editor`](apps/editor), [`docs/editor.md`](docs/editor.md) | 뼈를 잡아 돌리고 옮겨 키 넣기, 키 이동·복사·곡선(베지어) 편집, 슬롯·이벤트, 어니언 스킨, 실행 취소. MCP와 같은 `animations.json`에 저장하고, Claude가 고치면 자동으로 다시 불러옴 |
 | 뷰어 | [`apps/viewer`](apps/viewer) | 애니메이션 재생, 속도, 전환 시간, 뼈/메시/IK 표시, 파일 끌어다 놓기 |
 | 미리보기 렌더러 | [`packages/preview`](packages/preview), [`scripts/render.ts`](scripts/render.ts) | 헤드리스 브라우저로 그림 확인 이미지, 애니메이션 프레임, 구부림 자세를 PNG로. Claude가 결과를 눈으로 확인하는 데 씀 |
@@ -45,7 +45,7 @@ Stake Engine 슬롯 게임용 2D 뼈대 애니메이션 도구입니다. AI(Clau
 
 | 구성 요소 | 위치 | 내용 |
 |---|---|---|
-| 포맷 v0.1 | [`docs/format.md`](docs/format.md) | 뼈, 슬롯, region/mesh 첨부물, 가중치, IK, 애니메이션, 이벤트 |
+| 포맷 v0.1 | [`docs/format.md`](docs/format.md) | 뼈, 슬롯, region/mesh/clipping 첨부물, 가중치, IK, 애니메이션, 이벤트 |
 | 코어 엔진 | [`packages/core`](packages/core) | 검증기, 뼈 계산, 2본 IK, 메시 스키닝, 커브 30여 종, 트랙·전환·대기열·이벤트. DOM 의존 없음 |
 | PixiJS 8 런타임 | [`packages/pixi`](packages/pixi) | `Llm2dActor`. API를 spine-pixi-v8과 맞춤(`actor.state.setAnimation(0, 'win', true)`), Pixi 에셋 로더 |
 | Stake 연동 | [`packages/svelte`](packages/svelte), [`docs/stake.md`](docs/stake.md) | pixi-svelte용 `Llm2dProvider`/`Llm2dTrack`/`Llm2dBone`, 설치용 tgz(`pnpm pack:lib`) |
