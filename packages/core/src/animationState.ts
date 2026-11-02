@@ -20,8 +20,7 @@ const EMPTY = new AnimationData('<empty>', 0, [], []);
 export class TrackEntry {
   readonly animation: AnimationData;
   readonly trackIndex: number;
-  loop: boolean;
-  /** Speed multiplier for this entry. */
+  /** Speed multiplier for this entry (0 or more). */
   timeScale = 1;
   /** Weight of this track over the tracks below it (0..1). */
   alpha = 1;
@@ -37,11 +36,34 @@ export class TrackEntry {
   listener: TrackListener | null = null;
   /** Internal: union of channels written by this entry and its mixing chain. */
   mask: Uint8Array | null = null;
+  /** True once `end` was sent: the entry is not applied any more. */
+  ended = false;
+  /**
+   * Internal: where the last iteration began when looping was switched off part-way, so the
+   * animation plays to the end of that iteration instead of jumping to its last frame.
+   */
+  loopStart = 0;
+  private _loop: boolean;
 
   constructor(animation: AnimationData, trackIndex: number, loop: boolean) {
     this.animation = animation;
     this.trackIndex = trackIndex;
-    this.loop = loop;
+    this._loop = loop;
+  }
+
+  /**
+   * Whether the animation repeats. Turning it off while looping lets the current iteration
+   * finish, then fires `complete` and holds the last frame.
+   */
+  get loop(): boolean {
+    return this._loop;
+  }
+
+  set loop(value: boolean) {
+    if (value === this._loop) return;
+    this._loop = value;
+    const d = this.animation.duration;
+    this.loopStart = !value && d > 0 && this.trackTime > 0 ? Math.floor(this.trackTime / d) * d : 0;
   }
 
   /** Time inside the animation, accounting for looping. */
@@ -49,34 +71,42 @@ export class TrackEntry {
     const d = this.animation.duration;
     const t = Math.max(0, this.trackTime);
     if (d <= 0) return 0;
-    return this.loop ? t % d : Math.min(t, d);
+    return this._loop ? t % d : Math.min(Math.max(0, t - this.loopStart), d);
   }
 
   get isComplete(): boolean {
-    return !this.loop && this.trackTime >= this.animation.duration;
+    return !this._loop && this.trackTime - this.loopStart >= this.animation.duration;
   }
 }
+
+type Notice = { type: 'start' | 'interrupt' | 'end' | 'complete'; entry: TrackEntry } | { type: 'event'; entry: TrackEntry; event: EventData };
 
 /**
  * Plays animations on numbered tracks. Higher tracks are applied over lower ones, so a
  * track-1 "blink" can run on top of a track-0 "idle". Switching animations on a track
  * crossfades from the previous one. The API mirrors spine-ts so game code ports easily.
+ *
+ * Listeners are called after the state change that caused them is complete (like spine's
+ * event queue), so a listener may call setAnimation, addAnimation or clearTrack safely.
  */
 export class AnimationState {
   readonly data: SkeletonData;
   readonly tracks: (TrackEntry | null)[] = [];
-  /** Global speed multiplier. */
+  /** Global speed multiplier (0 or more). */
   timeScale = 1;
   /** Crossfade used when no specific mix is set. */
   defaultMix = 0.15;
 
   private readonly mixes = new Map<string, number>();
   private readonly listeners: TrackListener[] = [];
-  private readonly masks = new Map<AnimationData, Uint8Array>();
+  private readonly masks = new WeakMap<AnimationData, Uint8Array>();
   private readonly base: Float32Array;
   private readonly baseAttachments: Int16Array;
   private readonly scratch: Float32Array;
   private readonly scratchAttachments: Int16Array;
+  private readonly notices: Notice[] = [];
+  private draining = false;
+  private _version = 0;
 
   constructor(data: SkeletonData) {
     this.data = data;
@@ -84,6 +114,11 @@ export class AnimationState {
     this.scratch = new Float32Array(data.channelCount);
     this.baseAttachments = new Int16Array(data.slots.length);
     this.scratchAttachments = new Int16Array(data.slots.length);
+  }
+
+  /** Counts changes (tracks set or cleared, time advanced): a renderer re-poses when it moves. */
+  get version(): number {
+    return this._version;
   }
 
   addListener(listener: TrackListener): void {
@@ -119,28 +154,36 @@ export class AnimationState {
 
   /** Plays an animation now, crossfading from whatever the track was playing. */
   setAnimation(trackIndex: number, name: string, loop = false): TrackEntry {
-    return this.setEntry(trackIndex, new TrackEntry(this.findAnimation(name), trackIndex, loop));
+    const entry = new TrackEntry(this.findAnimation(name), trackIndex, loop);
+    this.setEntry(trackIndex, entry);
+    this.drain();
+    return entry;
   }
 
   /**
    * Queues an animation after the last queued entry of the track. With delay <= 0 it starts
-   * when the previous animation ends (minus the crossfade, plus delay). With delay > 0 it
-   * starts that many seconds after the previous entry started.
+   * when the previous animation ends (for a looping one, at the end of its current loop), minus
+   * the crossfade, plus delay. With delay > 0 it starts that many seconds after the previous
+   * entry started.
    */
   addAnimation(trackIndex: number, name: string, loop = false, delay = 0): TrackEntry {
-    return this.queueEntry(new TrackEntry(this.findAnimation(name), trackIndex, loop), delay);
+    const entry = this.queueEntry(new TrackEntry(this.findAnimation(name), trackIndex, loop), delay);
+    this.drain();
+    return entry;
   }
 
   /** Fades the track out to the pose below it over `mixDuration`, then clears it. */
   setEmptyAnimation(trackIndex: number, mixDuration = 0): TrackEntry {
     const e = new TrackEntry(EMPTY, trackIndex, false);
     this.setEntry(trackIndex, e, mixDuration);
+    this.drain();
     return e;
   }
 
   addEmptyAnimation(trackIndex: number, mixDuration = 0, delay = 0): TrackEntry {
     const e = new TrackEntry(EMPTY, trackIndex, false);
     this.queueEntry(e, delay, mixDuration);
+    this.drain();
     return e;
   }
 
@@ -148,18 +191,27 @@ export class AnimationState {
     const e = this.tracks[trackIndex];
     if (!e) return;
     this.tracks[trackIndex] = null;
-    for (let f: TrackEntry | null = e; f; f = f.mixingFrom) this.emit('end', f);
+    this._version++;
+    for (let q: TrackEntry | null = e.next; q; q = q.next) this.notify('end', q);
+    e.next = null;
+    for (let f: TrackEntry | null = e; f; f = f.mixingFrom) this.notify('end', f);
+    this.drain();
   }
 
   clearTracks(): void {
     for (let i = 0; i < this.tracks.length; i++) this.clearTrack(i);
   }
 
-  private setEntry(trackIndex: number, entry: TrackEntry, mix?: number): TrackEntry {
+  private setEntry(trackIndex: number, entry: TrackEntry, mix?: number): void {
     const current = this.tracks[trackIndex] ?? null;
+    while (this.tracks.length <= trackIndex) this.tracks.push(null);
+    this.tracks[trackIndex] = entry;
+    this._version++;
     if (current) {
+      // Entries queued after the current one are dropped with it.
+      for (let q: TrackEntry | null = current.next; q; q = q.next) this.notify('end', q);
       current.next = null;
-      this.emit('interrupt', current);
+      this.notify('interrupt', current);
       const duration = mix ?? this.getMix(current.animation, entry.animation);
       if (duration > 0) {
         entry.mixingFrom = current;
@@ -168,18 +220,15 @@ export class AnimationState {
         let depth = 0;
         for (let f: TrackEntry | null = current; f; f = f.mixingFrom) {
           if (++depth >= 3 && f.mixingFrom) {
-            for (let g: TrackEntry | null = f.mixingFrom; g; g = g.mixingFrom) this.emit('end', g);
+            for (let g: TrackEntry | null = f.mixingFrom; g; g = g.mixingFrom) this.notify('end', g);
             f.mixingFrom = null;
           }
         }
       } else {
-        for (let f: TrackEntry | null = current; f; f = f.mixingFrom) this.emit('end', f);
+        for (let f: TrackEntry | null = current; f; f = f.mixingFrom) this.notify('end', f);
       }
     }
-    while (this.tracks.length <= trackIndex) this.tracks.push(null);
-    this.tracks[trackIndex] = entry;
-    this.emit('start', entry);
-    return entry;
+    this.notify('start', entry);
   }
 
   private queueEntry(entry: TrackEntry, delay: number, mix?: number): TrackEntry {
@@ -191,58 +240,71 @@ export class AnimationState {
     }
     while (last.next) last = last.next;
     entry.mixDuration = mix ?? this.getMix(last.animation, entry.animation);
-    entry.delay = delay > 0 ? delay : Math.max(0, last.animation.duration + delay - entry.mixDuration);
+    if (delay <= 0) {
+      const d = last.animation.duration;
+      let end: number;
+      if (d <= 0) end = Math.max(0, last.trackTime);
+      else if (last.loop) end = d * (1 + Math.floor(Math.max(0, last.trackTime) / d));
+      else end = Math.max(last.loopStart + d, last.trackTime);
+      delay = Math.max(0, end + delay - entry.mixDuration);
+    }
+    entry.delay = delay;
     last.next = entry;
+    this._version++;
     return entry;
   }
 
   /** Advances time. Fires events, completes, and starts queued entries. */
   update(dt: number): void {
-    dt *= this.timeScale;
+    dt *= Math.max(0, this.timeScale);
+    this._version++;
     for (let i = 0; i < this.tracks.length; i++) {
-      const e = this.tracks[i];
-      if (!e) continue;
-      let d = dt * e.timeScale;
-      const next = e.next;
-      if (next && e.trackTime + d >= next.delay) {
-        const used = Math.max(0, next.delay - e.trackTime);
-        this.advance(e, used);
-        this.updateMixing(e, used);
-        const leftover = (d - used) / (e.timeScale || 1);
-        e.next = null;
-        next.mixingFrom = next.mixDuration > 0 ? e : null;
-        if (!next.mixingFrom) for (let f: TrackEntry | null = e; f; f = f.mixingFrom) this.emit('end', f);
-        else this.emit('interrupt', e);
-        this.tracks[i] = next;
-        this.emit('start', next);
-        d = leftover * next.timeScale;
-        this.advance(next, d);
-        this.updateMixing(next, d);
-        continue;
-      }
-      this.advance(e, d);
-      this.updateMixing(e, d);
-      if (e.animation === EMPTY && !e.mixingFrom) {
-        this.tracks[i] = null;
-        this.emit('end', e);
+      let e = this.tracks[i];
+      let left = dt;
+      while (e) {
+        const ts = Math.max(0, e.timeScale);
+        const next = e.next;
+        // Seconds (unscaled) until the queued entry is due.
+        const until = next ? (e.trackTime >= next.delay ? 0 : ts > 0 ? (next.delay - e.trackTime) / ts : Infinity) : Infinity;
+        if (next && until <= left) {
+          this.advance(e, until * ts);
+          this.updateMixing(e, until);
+          left -= until;
+          e.next = null;
+          next.mixingFrom = next.mixDuration > 0 ? e : null;
+          if (next.mixingFrom) this.notify('interrupt', e);
+          else for (let f: TrackEntry | null = e; f; f = f.mixingFrom) this.notify('end', f);
+          this.tracks[i] = next;
+          this.notify('start', next);
+          e = next;
+          continue;
+        }
+        this.advance(e, left * ts);
+        this.updateMixing(e, left);
+        if (e.animation === EMPTY && !e.mixingFrom && !e.next) {
+          this.tracks[i] = null;
+          this.notify('end', e);
+        }
+        break;
       }
     }
+    this.drain();
   }
 
-  private updateMixing(e: TrackEntry, d: number): void {
+  /** Advances the entries `e` is fading out from; `dt` is unscaled, as the fade runs in real time. */
+  private updateMixing(e: TrackEntry, dt: number): void {
     const from = e.mixingFrom;
     if (!from) return;
-    const fd = d * (from.timeScale / (e.timeScale || 1));
-    this.advance(from, fd);
-    this.updateMixing(from, fd);
-    e.mixTime += d;
+    this.advance(from, dt * Math.max(0, from.timeScale));
+    this.updateMixing(from, dt);
+    e.mixTime += dt;
     if (e.mixTime >= e.mixDuration) {
-      for (let f: TrackEntry | null = from; f; f = f.mixingFrom) this.emit('end', f);
+      for (let f: TrackEntry | null = from; f; f = f.mixingFrom) this.notify('end', f);
       e.mixingFrom = null;
     }
   }
 
-  /** Moves an entry's clock and fires events/complete for the passed interval. */
+  /** Moves an entry's clock and queues events/complete for the passed interval. */
   private advance(e: TrackEntry, d: number): void {
     const t0 = e.trackTime;
     const t1 = t0 + d;
@@ -251,12 +313,15 @@ export class AnimationState {
     const from = Math.max(0, t0);
     const anim = e.animation;
     const dur = anim.duration;
+    // Events in [lo, hi), or [lo, hi] when the interval runs to the end of the animation.
     const fire = (lo: number, hi: number, inclusiveEnd: boolean) => {
-      for (const ev of anim.events)
-        if (ev.time >= lo && (ev.time < hi || (inclusiveEnd && ev.time === hi))) this.emitEvent(e, ev);
+      for (const ev of anim.events) if (ev.time >= lo && (ev.time < hi || (inclusiveEnd && ev.time === hi))) this.notify('event', e, ev);
     };
     if (dur <= 0) {
-      if (from === 0 && t0 <= 0) this.emit('complete', e);
+      if (t0 <= 0) {
+        fire(0, 0, true);
+        this.notify('complete', e);
+      }
       return;
     }
     if (e.loop) {
@@ -264,14 +329,19 @@ export class AnimationState {
       const last = Math.floor(t1 / dur);
       for (let loop = first; loop <= last; loop++) {
         const lo = loop === first ? from - loop * dur : 0;
-        const hi = loop === last ? t1 - loop * dur : dur;
-        fire(lo, hi, false);
-        if (loop < last) this.emit('complete', e);
+        if (loop < last) {
+          fire(lo, dur, true);
+          this.notify('complete', e);
+        } else fire(lo, t1 - loop * dur, false);
       }
-    } else if (from < dur) {
-      const reached = t1 >= dur;
-      fire(from, Math.min(t1, dur), reached);
-      if (reached) this.emit('complete', e);
+      return;
+    }
+    const a0 = Math.max(0, from - e.loopStart);
+    const a1 = t1 - e.loopStart;
+    if (a0 < dur) {
+      const reached = a1 >= dur;
+      fire(a0, Math.min(a1, dur), reached);
+      if (reached) this.notify('complete', e);
     }
   }
 
@@ -286,9 +356,10 @@ export class AnimationState {
       const mask = this.applyEntry(e, skeleton);
       if (e.alpha < 1) {
         const angles = this.data.angleChannels;
+        const alpha = Math.max(0, e.alpha);
         for (let c = 0; c < mask.length; c++)
-          if (mask[c]) ch[c] = angles[c] ? lerpAngle(this.base[c], ch[c], e.alpha) : lerp(this.base[c], ch[c], e.alpha);
-        if (e.alpha < 0.5) skeleton.attachments.set(this.baseAttachments);
+          if (mask[c]) ch[c] = angles[c] ? lerpAngle(this.base[c], ch[c], alpha) : lerp(this.base[c], ch[c], alpha);
+        if (alpha < 0.5) skeleton.attachments.set(this.baseAttachments);
       }
     }
   }
@@ -331,13 +402,34 @@ export class AnimationState {
     return mask;
   }
 
-  private emit(type: 'start' | 'interrupt' | 'end' | 'complete', entry: TrackEntry): void {
-    entry.listener?.[type]?.(entry);
-    for (const l of this.listeners) l[type]?.(entry);
+  /** Queues a listener call; `end` is sent once per entry and nothing follows it. */
+  private notify(type: 'start' | 'interrupt' | 'end' | 'complete', entry: TrackEntry): void;
+  private notify(type: 'event', entry: TrackEntry, event: EventData): void;
+  private notify(type: Notice['type'], entry: TrackEntry, event?: EventData): void {
+    if (entry.ended) return;
+    if (type === 'end') entry.ended = true;
+    this.notices.push(type === 'event' ? { type, entry, event: event! } : { type, entry });
   }
 
-  private emitEvent(entry: TrackEntry, event: EventData): void {
-    entry.listener?.event?.(entry, event);
-    for (const l of this.listeners) l.event?.(entry, event);
+  /** Calls the listeners for queued notices, including ones queued by those listeners. */
+  private drain(): void {
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      for (let i = 0; i < this.notices.length; i++) {
+        const n = this.notices[i];
+        const listeners = this.listeners.slice();
+        if (n.type === 'event') {
+          n.entry.listener?.event?.(n.entry, n.event);
+          for (const l of listeners) l.event?.(n.entry, n.event);
+        } else {
+          n.entry.listener?.[n.type]?.(n.entry);
+          for (const l of listeners) l[n.type]?.(n.entry);
+        }
+      }
+    } finally {
+      this.notices.length = 0;
+      this.draining = false;
+    }
   }
 }

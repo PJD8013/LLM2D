@@ -249,7 +249,13 @@ export function validate(input: unknown): ValidationResult {
             const ip = `${ap}.ik.${ik}`;
             if (!ikNames.has(ik)) err(ip, `Unknown IK constraint "${ik}"`);
             if (!isObj(tl)) err(ip, 'Must be an object with mix');
-            else keyCount += checkKeys(tl.mix, `${ip}.mix`, ['value'], [], err);
+            else {
+              keyCount += checkKeys(tl.mix, `${ip}.mix`, ['value'], [], err);
+              if (Array.isArray(tl.mix))
+                tl.mix.forEach((k, j) => {
+                  if (isObj(k) && isNum(k.value) && (k.value < 0 || k.value > 1)) err(`${ip}.mix[${j}].value`, 'Must be between 0 and 1');
+                });
+            }
           }
       }
       if (anim.events !== undefined) {

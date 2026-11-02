@@ -39,15 +39,22 @@
       applyOptions(entry);
       return;
     }
+    // Moved to another track: the old one fades out as if the component were removed.
+    if (entry && entry.trackIndex !== trackIndex && actor.state.getCurrent(entry.trackIndex) === entry)
+      actor.state.setEmptyAnimation(entry.trackIndex, props.mixOut ?? 0);
+    const previous = actor.state.defaultMix;
     try {
-      const previous = actor.state.defaultMix;
       if (props.mix !== undefined) actor.state.defaultMix = props.mix;
       entry = actor.state.setAnimation(trackIndex, animationName, props.loop ?? false);
-      actor.state.defaultMix = previous;
-      applyOptions(entry);
     } catch (error) {
       console.error(error);
+      return;
+    } finally {
+      actor.state.defaultMix = previous;
     }
+    applyOptions(entry);
+    // The state sent `start` before the listener was set.
+    entry.listener?.start?.(entry);
   });
 
   onDestroy(() => {

@@ -126,7 +126,24 @@ export default {
 | `Llm2dBone` | `boneName`; 자식이 뼈의 위치·회전·크기를 따라감 |
 
 `animationName`을 바꾸면 이전 애니메이션에서 부드럽게 넘어갑니다. 컴포넌트를 제거하면 그 트랙이
-`mixOut` 동안 사라집니다. `listener`는 Spine과 같은 모양(`start`, `complete`, `end`, `interrupt`, `event`)입니다.
+`mixOut` 동안 사라집니다. `trackIndex`를 바꾸면 이전 트랙은 같은 방식으로 사라집니다. `listener`는 Spine과
+같은 모양(`start`, `complete`, `end`, `interrupt`, `event`)입니다.
+
+### 런타임 동작
+
+- **listener는 상태 변경이 끝난 뒤에 불립니다**(Spine의 이벤트 큐와 같음). `end`나 `complete` 안에서
+  `setAnimation`, `addAnimation`, `clearTrack`을 불러도 됩니다. 엔트리마다 `end`는 한 번만 옵니다.
+- **반복 중에 `loop`를 끄면** 지금 바퀴를 끝까지 재생하고 `complete`를 한 번 보낸 뒤 마지막 프레임에
+  멈춥니다(Spine은 바로 마지막 프레임으로 건너뜁니다). `Llm2dTrack`의 `loop`를 바꿀 때도 같습니다.
+- 반복 애니메이션 뒤에 `addAnimation(트랙, 이름)`(delay 0 이하)을 하면 **지금 바퀴가 끝날 때** 넘어갑니다.
+- 애니메이션 끝 시각(`duration`)에 둔 이벤트는 반복할 때마다 한 번씩 옵니다. 길이 0인 애니메이션의
+  이벤트도 옵니다.
+- 대기열에 있던 엔트리가 `setAnimation`/`clearTrack`으로 버려지면 그 엔트리에 `end`가 옵니다.
+- `timeScale`은 0 이상입니다(음수는 0). 크로스페이드는 엔트리 속도와 상관없이 실제 시간으로 진행합니다.
+- `autoUpdate`(기본)일 때 자세는 **그리기 직전에** 맞춥니다. 마운트한 첫 프레임부터 애니메이션 자세가
+  보입니다.
+- `actor.destroy()`는 메시와 GPU 버퍼를 지우고 **텍스처는 지우지 않습니다**(같은 에셋을 쓰는 다른 액터가
+  있으므로). 텍스처는 에셋을 내릴 때(`Assets.unload`) 지웁니다.
 
 ## 5. 심볼 상태와 연결하기 (web-sdk 샘플 게임)
 

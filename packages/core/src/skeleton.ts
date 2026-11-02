@@ -17,6 +17,8 @@ export class Skeleton {
   private readonly local = mat();
   private readonly tmp = mat();
   private readonly skin: Float64Array;
+  /** Channels as animated, kept while IK rotates bones for the world transforms only. */
+  private readonly beforeIk: Float32Array;
 
   constructor(data: SkeletonData) {
     this.data = data;
@@ -24,6 +26,7 @@ export class Skeleton {
     this.attachments = new Int16Array(data.slots.length);
     this.world = data.bones.map(() => mat());
     this.skin = new Float64Array(data.bones.length * 6);
+    this.beforeIk = new Float32Array(data.channelCount);
     this.setToSetupPose();
     this.updateWorldTransform();
   }
@@ -33,16 +36,25 @@ export class Skeleton {
     this.attachments.set(this.data.setupAttachments);
   }
 
-  /** Recomputes bone world transforms, then solves IK constraints in order. */
+  /**
+   * Recomputes bone world transforms, then solves IK constraints in order. IK changes the world
+   * transforms only; `channels` keep the animated values, so calling this again gives the same pose.
+   */
   updateWorldTransform(): void {
     this.updateBones(0);
+    let saved = false;
     for (const ik of this.data.ik) {
-      const mix = this.channels[this.data.ikChannelBase + ik.index];
-      if (mix <= 0) continue;
+      const mix = clamp(this.channels[this.data.ikChannelBase + ik.index], 0, 1);
+      if (!(mix > 0)) continue;
+      if (!saved) {
+        this.beforeIk.set(this.channels);
+        saved = true;
+      }
       if (ik.bones.length === 1) this.solveAim(ik.bones[0], ik.target, mix);
       else this.solveLimb(ik.bones[0], ik.bones[1], ik.target, ik.bendPositive, mix);
       this.updateBones(ik.bones[0]);
     }
+    if (saved) this.channels.set(this.beforeIk);
     // Skinning matrices: world * inverseBind.
     for (let i = 0; i < this.world.length; i++) {
       multiply(this.tmp, this.world[i], this.data.inverseBind[i]);
@@ -84,8 +96,8 @@ export class Skeleton {
   }
 
   /**
-   * Analytic two-bone IK in the parent bone's parent space. Assumes the parent bone has
-   * (roughly) uniform scale; the child's origin may sit anywhere in the parent's space.
+   * Analytic two-bone IK in the parent bone's parent space. The parent bone may be scaled or
+   * mirrored; the child's origin may sit anywhere in the parent's space.
    */
   private solveLimb(parent: number, child: number, target: number, bendPositive: boolean, mix: number): void {
     const ch = this.channels;
@@ -114,9 +126,13 @@ export class Skeleton {
     const ex = px + l1 * Math.cos(theta);
     const ey = py + l1 * Math.sin(theta);
     const parentRot = (theta - delta) / DEG;
-    let childWorld = Math.atan2(ty - ey, tx - ex) / DEG;
-    if (Math.hypot(tx - ex, ty - ey) < 1e-6) childWorld = theta / DEG;
-    const childRot = childWorld - parentRot;
+    let childWorld = Math.atan2(ty - ey, tx - ex);
+    if (Math.hypot(tx - ex, ty - ey) < 1e-6) childWorld = theta;
+    // The child's x axis seen from the parent's parent is R(parentRot) * S(sx, sy) * R(childRot) * x,
+    // so undo the parent's (possibly mirrored or uneven) scale on the wanted direction.
+    const want = childWorld - parentRot * DEG;
+    let childRot = Math.atan2(Math.sin(want) / (ch[po + CH_SY] || 1), Math.cos(want) / (sp || 1)) / DEG;
+    if (ch[co + CH_SX] < 0) childRot += 180;
     ch[po + CH_ROT] = lerpAngle(ch[po + CH_ROT], parentRot, mix);
     ch[co + CH_ROT] = lerpAngle(ch[co + CH_ROT], childRot, mix);
   }
