@@ -47,7 +47,7 @@
   const scale = $derived.by(() => {
     const extra = xy(scaleProp, 1);
     const b = loaded?.data.bounds;
-    if (!b || (!width && !height)) return extra;
+    if (!b || (!width && !height) || !(b.width > 0 && b.height > 0)) return extra;
     let sx = width ? width / b.width : height! / b.height;
     let sy = height ? height / b.height : sx;
     if (!height) sy = sx;

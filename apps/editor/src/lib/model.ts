@@ -70,13 +70,14 @@ export function getKey(anim: L2DAnimation, ref: KeyRef): AnyKey | undefined {
 
 /**
  * Adds a key, or replaces the key at the same time (keeping its curve unless the new key has
- * one). Events are different: several may share a time, so they are always added.
+ * one, or `keepCurve` is false). Events are different: several may share a time, so they are
+ * always added.
  */
-export function setKey(anim: L2DAnimation, t: Track, key: AnyKey): void {
+export function setKey(anim: L2DAnimation, t: Track, key: AnyKey, keepCurve = true): void {
   const keys = list(anim, t, true)!;
   const i = t.group === 'events' ? -1 : keys.findIndex((k) => sameTime(k.time, key.time));
   if (i >= 0) {
-    const curve = key.curve ?? keys[i].curve;
+    const curve = keepCurve ? (key.curve ?? keys[i].curve) : key.curve;
     keys[i] = { ...key, time: keys[i].time };
     if (curve !== undefined && t.channel !== 'attachment') keys[i].curve = curve;
     return;
@@ -95,11 +96,19 @@ export function deleteKeys(anim: L2DAnimation, refs: KeyRef[]): void {
   prune(anim);
 }
 
+/** The references without repeats (events sharing a time have one reference). */
+export function uniqueRefs(refs: KeyRef[]): KeyRef[] {
+  const seen = new Set<string>();
+  return refs.filter((r) => !seen.has(keyId(r)) && !!seen.add(keyId(r)));
+}
+
 /**
  * Moves keys in time by `dt` (clamped at 0). Moved keys replace keys already at their new
  * time. Returns the moved keys' new references.
  */
 export function moveKeys(anim: L2DAnimation, refs: KeyRef[], dt: number): KeyRef[] {
+  refs = uniqueRefs(refs);
+  if (!refs.length) return [];
   const byTrack = new Map<string, { track: Track; times: number[] }>();
   for (const r of refs) {
     const id = trackId(r);
@@ -118,7 +127,7 @@ export function moveKeys(anim: L2DAnimation, refs: KeyRef[], dt: number): KeyRef
     keys.splice(0, keys.length, ...[...kept, ...moved].sort((a, b) => a.time - b.time));
     for (const m of moved) out.push({ ...track, time: m.time } as KeyRef);
   }
-  return out;
+  return uniqueRefs(out);
 }
 
 /** Sets (or with undefined, removes) the curve of the referenced keys. */
@@ -310,7 +319,7 @@ export interface Clip {
 
 /** Copies keys with times relative to the earliest one. */
 export function copyKeys(anim: L2DAnimation, refs: KeyRef[]): Clip | null {
-  const found = refs.flatMap((r) =>
+  const found = uniqueRefs(refs).flatMap((r) =>
     r.group === 'events'
       ? keysOf(anim, r).filter((k) => sameTime(k.time, r.time)).map((key) => ({ track: toTrack(r), key }))
       : [getKey(anim, r)].filter((k): k is AnyKey => !!k).map((key) => ({ track: toTrack(r), key })),
@@ -320,13 +329,15 @@ export function copyKeys(anim: L2DAnimation, refs: KeyRef[]): Clip | null {
   return { items: found.map((f) => ({ track: f.track, key: structuredClone({ ...f.key, time: round(f.key.time - t0, 4) }) })) };
 }
 
-/** Pastes copied keys starting at `at`; returns the new keys. */
+/** Pastes copied keys starting at `at` (replacing keys there, curve included); returns the new keys. */
 export function pasteKeys(anim: L2DAnimation, clip: Clip, at: number): KeyRef[] {
-  return clip.items.map(({ track, key }) => {
-    const time = round(at + key.time, 4);
-    setKey(anim, track, { ...structuredClone(key), time });
-    return { ...track, time } as KeyRef;
-  });
+  return uniqueRefs(
+    clip.items.map(({ track, key }) => {
+      const time = round(at + key.time, 4);
+      setKey(anim, track, { ...structuredClone(key), time }, false);
+      return { ...track, time } as KeyRef;
+    }),
+  );
 }
 
 // ---------------- Undo ----------------
@@ -361,6 +372,11 @@ export class History {
     if (next === undefined) return null;
     this.past.push(current);
     return next;
+  }
+
+  /** Forgets the last recorded state (a change that turned out to change nothing). */
+  dropLast(): void {
+    this.past.pop();
   }
 
   get canUndo(): boolean {

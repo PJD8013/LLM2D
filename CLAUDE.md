@@ -6,14 +6,17 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
 ## Layout
 
 - `packages/core` — format types, validator, compiled `SkeletonData`, `Skeleton` (world transforms,
-  IK, skinning), `AnimationState` (tracks, mixing, queue, events). No DOM, runs in Node.
+  IK, skinning), `AnimationState` (tracks, mixing, queue, events; listeners run after the state change,
+  like spine's event queue). No DOM, runs in Node.
 - `packages/pixi` — `Llm2dActor` (PixiJS 8 `Mesh` per slot, CPU skinning) and `loadLlm2d`.
 - `packages/rig` — Node-only auto-rigging: `readPsd`, contour + constrained Delaunay `buildMesh`,
   medial-axis `chainJoints`, geodesic `computeWeights`, `buildRig(art, spec)`. `bendTest`/`bendPoses`
   live in core so the viewer can use them. Flat pictures: `segment.ts` (`removeBackground`, `segmentArt`:
-  median + Felzenszwalb graph segmentation, outline strokes as label -1, neck splitting) and `split.ts`
-  (`splitArt`: parts back to front from region ids/points/polygons/strokes, outlines to the front part,
-  hidden areas rebuilt by disk closing + overlap; restacked layers must equal the input, `report.difference`).
+  median + Felzenszwalb graph segmentation, outline strokes as label -1, neck splitting, broad soft areas
+  such as glows as regions) and `split.ts` (`splitArt`: parts back to front from region ids/points/polygons/
+  strokes, outlines with caps and fringe to the front part unless it has no outline of its own, hidden areas
+  rebuilt by disk closing + overlap + fully covered holes; restacked layers must equal the input,
+  `report.difference`).
 - `packages/motion` — motion presets (`applyPreset`, `describePresets`, `mergeAnimations`); pure TS.
 - `packages/preview` — Node-only renders via Playwright + the viewer: `inspectImage`, `Previewer`
   (`loadFile`, `contactSheet`, `bendSheet`, `frame`); `regionsImage`, `splitSheet`, `decodeImage`
@@ -24,9 +27,10 @@ The user communicates in Korean; write user-facing docs and replies in Korean.
   not rewrite `.ts`.
 - `packages/mcp` — stdio MCP server (`src/server.ts`, tools in `src/tools.ts`, project folders in
   `src/project.ts`). Registered for Claude Code in `.mcp.json`. Server `INSTRUCTIONS` describe the workflow.
-- `apps/editor` — Svelte 5 timeline editor (`pnpm editor [dir]`, port 5174). `server.ts` is a Vite plugin API
-  (`/api/projects`, `/api/project`, PUT `/api/project/animations` via the MCP `Project`, `/files/<encoded id>/...`,
-  `llm2d:changed` HMR event on outside edits). `src/lib/model.ts` (pure key ops, rows, history; unit-tested),
+- `apps/editor` — Svelte 5 timeline editor (`pnpm editor [dir]`, 127.0.0.1:5174, `--host` to expose). `server.ts`
+  is a Vite plugin API (`/api/projects`, `/api/project`, PUT `/api/project/animations` via the MCP `Project`,
+  `/files/<encoded id>/...`, `llm2d:changed` HMR event on outside edits; checks Host and Origin itself because
+  plugin middlewares run before Vite's host check). `src/lib/model.ts` (pure key ops, rows, history; unit-tested),
   `editor.svelte.ts` (state, undo, save; edits recompile one animation with `SkeletonData.setAnimation`),
   `stage.ts` (Pixi view, bone picking, rotate/move/scale drags). `test/editor.e2e.test.ts` drives it in Chromium.
 - `apps/viewer` — Vite viewer; also exposes `window.__llm2d` (`loadData`, `seek`, `frame`, `contactSheet`,

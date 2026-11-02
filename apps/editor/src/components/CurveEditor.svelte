@@ -8,9 +8,12 @@
   interface Props {
     curve: L2DCurve | undefined;
     mixed?: boolean;
-    onchange: (curve: L2DCurve | undefined) => void;
+    /** `live` is true for the steps of a handle drag (between onbegin and onend). */
+    onchange: (curve: L2DCurve | undefined, live?: boolean) => void;
+    onbegin?: () => void;
+    onend?: () => void;
   }
-  let { curve, mixed = false, onchange }: Props = $props();
+  let { curve, mixed = false, onchange, onbegin, onend }: Props = $props();
 
   const W = 176;
   const H = 120;
@@ -50,7 +53,13 @@
     const next = [...bez] as [number, number, number, number];
     next[dragging * 2] = Math.round(x * 100) / 100;
     next[dragging * 2 + 1] = Math.round(Math.max(-1, Math.min(2, y)) * 100) / 100;
-    onchange(next);
+    onchange(next, true);
+  }
+
+  function release() {
+    if (dragging === null) return;
+    dragging = null;
+    onend?.();
   }
 
   function setNumber(i: number, v: string) {
@@ -75,8 +84,9 @@
     role="img"
     aria-label="곡선 모양"
     onpointermove={moveHandle}
-    onpointerup={() => (dragging = null)}
-    onpointerleave={() => (dragging = null)}
+    onpointerup={release}
+    onpointercancel={release}
+    onlostpointercapture={release}
   >
     <rect x={PAD} y={sy(1)} width={W - 2 * PAD} height={sy(0) - sy(1)} class="box" />
     <path d={path} class="line" />
@@ -96,6 +106,7 @@
           onpointerdown={(e) => {
             dragging = h as 0 | 1;
             svg.setPointerCapture(e.pointerId);
+            onbegin?.();
           }}
         />
       {/each}

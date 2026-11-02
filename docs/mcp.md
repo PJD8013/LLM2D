@@ -81,7 +81,7 @@ claude
 | `describe_skeleton` | 뼈(부모, 위치, 각도, 길이), 슬롯과 첨부물, IK, 애니메이션 목록 |
 | `list_presets` | 모션 프리셋 목록과 매개변수 |
 | `apply_preset` | 프리셋으로 키 생성. `merge`로 여러 프리셋을 한 애니메이션에 합치기, `start`로 시작 시간 지정. 미리보기 반환 |
-| `set_animation` / `get_animation` / `delete_animation` | 애니메이션 JSON 직접 편집. 오류는 고칠 키 위치를 정확히 알려 줌 |
+| `set_animation` / `get_animation` / `delete_animation` | 애니메이션 JSON 직접 편집. `mode: "patch"`면 보낸 타임라인만 바꾸고 나머지는 유지(`[]`는 그 타임라인 삭제). 오류는 고칠 키 위치를 정확히 알려 줌 |
 | `render_animation` | 애니메이션 프레임 모음 이미지(디버그 표시 가능) |
 | `render_frame` | 특정 시간의 큰 프레임 한 장 또는 셋업 포즈 |
 | `validate_project` | 파일·이미지 검증 + 구부림 테스트 요약 |

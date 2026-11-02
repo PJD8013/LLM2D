@@ -79,7 +79,8 @@ export class Stage {
     this.app.destroy(true, { children: true });
   }
 
-  setSkeleton(loaded: LoadedLlm2d) {
+  /** Shows a skeleton; `keepView` keeps zoom and pan (reloading the same project). */
+  setSkeleton(loaded: LoadedLlm2d, keepView = false) {
     if (!this.host) return;
     this.actor?.destroy();
     for (const g of this.onionActors) g.destroy();
@@ -94,7 +95,8 @@ export class Stage {
     });
     this.ghosts.addChild(...this.onionActors);
     this.view.addChild(this.actor);
-    this.resetView();
+    if (keepView) this.fit();
+    else this.resetView();
   }
 
   resetView() {
@@ -218,6 +220,28 @@ export class Stage {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
+  /**
+   * Angle of a screen point around a bone's origin, measured in the bone's parent space where
+   * its rotation lives, so the bone follows the pointer under scaled or mirrored parents.
+   */
+  private angleAround(bone: number, p: { x: number; y: number }): number {
+    const sk = this.actor!.skeleton;
+    const q = this.view.toLocal(p);
+    let x = q.x;
+    let y = q.y;
+    const parent = this.actor!.data.bones[bone].parent;
+    if (parent >= 0) {
+      const m = sk.world[parent];
+      const det = m[0] * m[3] - m[1] * m[2] || 1;
+      const rx = x - m[4];
+      const ry = y - m[5];
+      x = (m[3] * rx - m[2] * ry) / det;
+      y = (-m[1] * rx + m[0] * ry) / det;
+    }
+    const o = bone * BONE_CHANNELS;
+    return Math.atan2(y - sk.channels[o + CH_Y], x - sk.channels[o + CH_X]);
+  }
+
   /** The bone under a screen point (nearest within a few pixels), or -1. */
   pick(p: { x: number; y: number }): number {
     if (!this.actor) return -1;
@@ -273,7 +297,7 @@ export class Stage {
       bone,
       tool,
       start: p,
-      last: Math.hypot(p.x - origin.x, p.y - origin.y) > 10 ? Math.atan2(p.y - origin.y, p.x - origin.x) : null,
+      last: Math.hypot(p.x - origin.x, p.y - origin.y) > 10 ? this.angleAround(bone, p) : null,
       turned: 0,
       fromEmpty: hit < 0,
       moved: false,
@@ -315,20 +339,19 @@ export class Stage {
     const origin = this.view.toGlobal({ x: w[0], y: w[1] });
     const parent = data.bones[d.bone].parent;
     const pw = parent >= 0 ? sk.world[parent] : null;
-    const mirrored = pw ? pw[0] * pw[3] - pw[1] * pw[2] < 0 : false;
     const r3 = (v: number, k = 100) => Math.round(v * k) / k;
 
     if (d.tool === 'rotate') {
       // Angles right next to the pivot are noise: count turning only from 10 px away.
       if (Math.hypot(p.x - origin.x, p.y - origin.y) < 10) return;
-      const a = Math.atan2(p.y - origin.y, p.x - origin.x);
+      const a = this.angleAround(d.bone, p);
       if (d.last === null) d.last = a;
       let delta = a - d.last;
       while (delta > Math.PI) delta -= 2 * Math.PI;
       while (delta < -Math.PI) delta += 2 * Math.PI;
       d.turned += delta;
       d.last = a;
-      const deg = (d.turned * 180) / Math.PI * (mirrored ? -1 : 1);
+      const deg = (d.turned * 180) / Math.PI;
       this.editor.keyBone(name, 'rotate', { value: r3(d.rot + deg - setup[o + CH_ROT]) }, false);
     } else if (d.tool === 'translate') {
       // Screen delta -> skeleton space -> parent's local space.

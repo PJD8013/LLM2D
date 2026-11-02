@@ -89,3 +89,33 @@ export function lastKeyTime(anim: L2DAnimation): number {
   scan(anim.events);
   return Math.max(t, anim.duration ?? 0);
 }
+
+/**
+ * Applies a partial animation to `base`: every timeline in `patch` (a bone, slot or IK channel)
+ * replaces that timeline, an empty list deletes it, `events` replaces the events and `duration`
+ * replaces the duration. Everything not mentioned is kept.
+ */
+export function patchAnimation(base: L2DAnimation, patch: L2DAnimation): L2DAnimation {
+  const out = structuredClone(base) as Record<string, unknown> & L2DAnimation;
+  for (const group of ['bones', 'slots', 'ik'] as const) {
+    const changes = patch[group] as Record<string, Record<string, unknown[]>> | undefined;
+    if (!changes) continue;
+    const g = (out[group] ?? {}) as Record<string, Record<string, unknown[]>>;
+    for (const [target, channels] of Object.entries(changes)) {
+      const t = (g[target] ??= {});
+      for (const [channel, keys] of Object.entries(channels)) {
+        if (Array.isArray(keys) && keys.length === 0) delete t[channel];
+        else t[channel] = structuredClone(keys);
+      }
+      if (!Object.keys(t).length) delete g[target];
+    }
+    if (Object.keys(g).length) (out as Record<string, unknown>)[group] = g;
+    else delete out[group];
+  }
+  if (patch.events) {
+    if (patch.events.length) out.events = structuredClone(patch.events).sort((a, b) => a.time - b.time);
+    else delete out.events;
+  }
+  if (patch.duration !== undefined) out.duration = patch.duration;
+  return out;
+}

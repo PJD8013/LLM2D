@@ -1,4 +1,4 @@
-import { Container, Graphics, Matrix, Mesh, MeshGeometry, Texture, Ticker, type ContainerOptions } from 'pixi.js';
+import { Container, Graphics, Matrix, Mesh, MeshGeometry, Texture, Ticker, type ContainerOptions, type DestroyOptions } from 'pixi.js';
 import { AnimationState, Skeleton, type SkeletonData } from '@llm2d/core';
 
 export interface DebugOptions {
@@ -11,7 +11,10 @@ export interface Llm2dActorOptions extends ContainerOptions {
   data: SkeletonData;
   /** Texture per image name in `data.images`. */
   textures: Record<string, Texture>;
-  /** Advance with Ticker.shared automatically. Default true. */
+  /**
+   * Advance with Ticker.shared automatically. Default true. The pose is then applied right
+   * before each render, so animations set this frame already show (no setup-pose frame).
+   */
   autoUpdate?: boolean;
 }
 
@@ -35,6 +38,10 @@ export class Llm2dActor extends Container {
   private readonly meshes: Mesh[] = [];
   /** geometries[slot][attachment] */
   private readonly geometries: MeshGeometry[][] = [];
+  /** Stand-in geometries of slots without attachments. */
+  private readonly placeholders: MeshGeometry[] = [];
+  /** state.version when the pose was last applied. */
+  private posedVersion = -1;
   private readonly textures: Record<string, Texture>;
   private readonly shownAttachment: Int16Array;
   private readonly followers: BoneFollower[] = [];
@@ -64,8 +71,13 @@ export class Llm2dActor extends Container {
       );
       this.geometries.push(geoms);
       const first = data.attachments[slot.index][0];
+      let geometry = geoms[0];
+      if (!geometry) {
+        geometry = new MeshGeometry({ positions: new Float32Array(6), uvs: new Float32Array(6), indices: new Uint32Array([0, 1, 2]) });
+        this.placeholders.push(geometry);
+      }
       const mesh = new Mesh({
-        geometry: geoms[0] ?? new MeshGeometry({ positions: new Float32Array(6), uvs: new Float32Array(6), indices: new Uint32Array([0, 1, 2]) }),
+        geometry,
         texture: first ? this.textureFor(first.image) : Texture.EMPTY,
         label: slot.name,
       });
@@ -76,6 +88,9 @@ export class Llm2dActor extends Container {
     this.addChild(this.followerLayer);
     this.autoUpdate = autoUpdate;
     this.update(0);
+    this.onRender = () => {
+      if (this._autoUpdate && this.posedVersion !== this.state.version) this.pose();
+    };
   }
 
   private textureFor(image: string): Texture {
@@ -96,13 +111,19 @@ export class Llm2dActor extends Container {
   }
 
   private onTick(ticker: Ticker): void {
-    this.update(ticker.deltaMS / 1000);
+    // Only the clock moves here; the pose is applied before the next render (onRender).
+    this.state.update(ticker.deltaMS / 1000);
   }
 
   /** Advances animations by `dt` seconds and refreshes the meshes. */
   update(dt: number): void {
     this.state.update(dt);
+    this.pose();
+  }
+
+  private pose(): void {
     this.state.apply(this.skeleton);
+    this.posedVersion = this.state.version;
     this.refresh();
   }
 
@@ -226,9 +247,24 @@ export class Llm2dActor extends Container {
     }
   }
 
-  override destroy(options?: Parameters<Container['destroy']>[0]): void {
+  /**
+   * Frees the meshes and their GPU buffers. Textures are shared with other actors of the same
+   * asset, so they are never destroyed here (unload the asset for that). With `children: true`,
+   * objects attached to bones are destroyed too.
+   */
+  override destroy(options?: DestroyOptions): void {
     this.autoUpdate = false;
-    for (const list of this.geometries) for (const geom of list) geom.destroy();
-    super.destroy(options);
+    // Pixi's typing does not admit clearing it, but its setter does.
+    (this as { onRender: unknown }).onRender = null;
+    const children = typeof options === 'boolean' ? options : !!options?.children;
+    for (const mesh of this.meshes) mesh.destroy();
+    this.meshes.length = 0;
+    for (const list of this.geometries) for (const geom of list) geom.destroy(true);
+    for (const geom of this.placeholders) geom.destroy(true);
+    this.debugGraphics?.destroy();
+    this.debugGraphics = null;
+    this.followers.length = 0;
+    this.followerLayer.destroy({ children });
+    super.destroy({ children: false });
   }
 }

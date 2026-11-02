@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   composite,
   createImage,
+  decodePng,
   growLabels,
   parseColor,
   readPicture,
@@ -128,6 +129,47 @@ describe('flat picture split', () => {
     expect(cut.owner[20 * image.width + 100]).toBe(2);
     expect(() => splitArt(image, seg, { parts: [{ name: 'a b', regions: [1] }] })).toThrow(/Part name/);
     expect(() => splitArt(image, seg, { parts: [{ name: 'a', regions: [99] }] })).toThrow(/no region 99/);
+  });
+
+  it('splits a glowing symbol: the glow is rebuilt behind the coin, lines stay with what they outline', { timeout: 60_000 }, () => {
+    // The coin sample flattened: an additive glow, the outlined coin, a star with a light rim
+    // inside its outline and a translucent shine without an outline of its own.
+    const { image, segmentation } = readPicture(decodePng(readFileSync(join(root, 'samples/coin/source/coin-preview.png'))));
+    const result = splitArt(image, segmentation, {
+      parts: [
+        { name: 'glow', regions: [[320, 50]] },
+        { name: 'coin', regions: [[127, 309], [506, 271], [358, 131], [392, 225]] },
+        { name: 'star', regions: [[319, 323]] },
+        { name: 'shine', regions: [[287, 152], [212, 228]] },
+      ],
+    });
+    expect(result.report.difference).toBe(0);
+    const owner = (x: number, y: number) => result.owner[y * image.width + x];
+    // The face's ring line running along the shine is the coin's.
+    expect(owner(248, 154)).toBe(1);
+    // The round cap at the star's top point is the star's.
+    expect(owner(320, 209)).toBe(2);
+    // So is the outer edge of the coin's outline, which is thicker than the typical line.
+    expect(owner(98, 320)).toBe(1);
+    // The glow is a see-through layer of its own, continued faintly behind the whole coin.
+    const glow = result.art.layers[0];
+    let maxAlpha = 0;
+    for (let i = 3; i < glow.image.data.length; i += 4) maxAlpha = Math.max(maxAlpha, glow.image.data[i]);
+    expect(maxAlpha).toBeLessThan(128);
+    const centre = ((320 - glow.y) * glow.image.width + 320 - glow.x) * 4;
+    expect(glow.image.data[centre + 3]).toBeGreaterThan(40);
+    expect(glow.image.data[centre]).toBeGreaterThan(200); // orange, not darkened
+  });
+
+  it('composites additive layers as light: over nothing a glow keeps its colour', () => {
+    const px = (r: number, g: number, b: number, a: number) => {
+      const img = createImage(1, 1);
+      img.data.set([r, g, b, a]);
+      return img;
+    };
+    const layer = (image: RGBAImage, blend: 'normal' | 'add') => ({ name: 'l', x: 0, y: 0, image, hidden: false, opacity: 1, blend });
+    expect([...composite([layer(px(255, 180, 40, 100), 'add')], 1, 1).data]).toEqual([255, 180, 40, 100]);
+    expect([...composite([layer(px(100, 50, 0, 255), 'normal'), layer(px(255, 180, 40, 100), 'add')], 1, 1).data]).toEqual([200, 121, 16, 255]);
   });
 
   it('grows labels geodesically within passable pixels', () => {

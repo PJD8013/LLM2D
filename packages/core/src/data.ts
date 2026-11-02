@@ -75,7 +75,8 @@ export interface CurveTimeline {
   /** Channel indices written by this timeline (1 for scalars, 2 for vec2, 4 for colors). */
   channels: number[];
   op: TimelineOp;
-  times: Float32Array;
+  /** Key times in seconds (float64: a key at 0.3 must not land after an animation ending at 0.3). */
+  times: Float64Array;
   /** keyCount * channels.length values. */
   values: Float32Array;
   curves: EaseFn[];
@@ -84,7 +85,7 @@ export interface CurveTimeline {
 export interface AttachmentTimeline {
   kind: 'attachment';
   slot: number;
-  times: Float32Array;
+  times: Float64Array;
   /** Attachment index per key, -1 = hidden. */
   values: Int16Array;
 }
@@ -389,9 +390,10 @@ export class SkeletonData {
         start[v] = bones.length;
         const w = a.weights[v];
         let sum = 0;
-        for (let k = 1; k < w.length; k += 2) sum += w[k];
+        for (let k = 1; k < w.length; k += 2) if (w[k] > 0) sum += w[k];
         for (let k = 0; k < w.length; k += 2) {
-          if (w[k + 1] <= 0) continue;
+          // Normalised to 1; a vertex whose weights are all 0 follows its bones equally.
+          if (sum > 0 && !(w[k + 1] > 0)) continue;
           bones.push(local[w[k]]);
           weights.push(sum > 0 ? w[k + 1] / sum : 1 / (w.length / 2));
         }
@@ -432,7 +434,7 @@ export class SkeletonData {
         kind: 'curve',
         channels,
         op,
-        times: Float32Array.from(keys.map((k) => k.time)),
+        times: Float64Array.from(keys.map((k) => k.time)),
         values,
         curves: keys.map((k) => resolveCurve(k.curve)!),
       });
@@ -459,7 +461,7 @@ export class SkeletonData {
         timelines.push({
           kind: 'attachment',
           slot: s,
-          times: Float32Array.from(tl.attachment.map((k) => k.time)),
+          times: Float64Array.from(tl.attachment.map((k) => k.time)),
           values: Int16Array.from(tl.attachment.map((k) => (k.name === null ? -1 : this.findAttachment(s, k.name)))),
         });
       }
@@ -480,17 +482,18 @@ export class SkeletonData {
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    this.slots.forEach((s) => {
-      // Effects that start invisible (glows, flashes) should not inflate the framing.
-      if (s.attachment < 0 || s.color.a <= 0) return;
-      const v = this.attachments[s.index][s.attachment].vertices;
+    const add = (v: Float32Array) => {
       for (let i = 0; i < v.length; i += 2) {
         minX = Math.min(minX, v[i]);
         maxX = Math.max(maxX, v[i]);
         minY = Math.min(minY, v[i + 1]);
         maxY = Math.max(maxY, v[i + 1]);
       }
-    });
+    };
+    // Effects that start invisible (glows, flashes) should not inflate the framing...
+    for (const s of this.slots) if (s.attachment >= 0 && s.color.a > 0) add(this.attachments[s.index][s.attachment].vertices);
+    // ... unless everything starts invisible (a skeleton that fades in): then frame it all.
+    if (minX === Infinity) for (const list of this.attachments) for (const a of list) add(a.vertices);
     if (minX === Infinity) return { x: 0, y: 0, width: 0, height: 0 };
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }

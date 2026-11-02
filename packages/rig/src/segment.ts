@@ -534,12 +534,65 @@ export function segmentArt(img: RGBAImage, options: SegmentOptions = {}): Segmen
     }
   }
 
+  // ---- Wide semi-transparent areas (glows, soft shadows, smoke) are regions of their own ----
+  // Soft pixels (alpha below half) are usually the anti-aliased rim of a shape, one or two pixels
+  // wide. Where they form a broad area instead, they are an effect a part may need on its own.
+  {
+    const soft = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (labels[i] === -2) soft[i] = 1;
+    const depth0 = distanceTransform(soft, w, h);
+    let nextId = 0;
+    for (let i = 0; i < n; i++) if (labels[i] > nextId) nextId = labels[i];
+    const seen = new Uint8Array(n);
+    const minArea = Math.max(minSize * 4, objCount * 0.002);
+    for (let i = 0; i < n; i++) {
+      if (!soft[i] || seen[i]) continue;
+      const members: number[] = [];
+      let deepest = 0;
+      const stack = [i];
+      seen[i] = 1;
+      while (stack.length) {
+        const k = stack.pop()!;
+        members.push(k);
+        if (depth0[k] > deepest) deepest = depth0[k];
+        const x = k % w;
+        const y = (k - x) / w;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const j = ny * w + nx;
+            if (soft[j] && !seen[j]) {
+              seen[j] = 1;
+              stack.push(j);
+            }
+          }
+      }
+      if (deepest < 3 || members.length < minArea) continue;
+      nextId++;
+      for (const k of members) {
+        // Keep the thin rim right next to opaque shapes as edge pixels; the broad body is the region.
+        if (depth0[k] < 1.5) continue;
+        labels[k] = nextId;
+        passable[k] = 0;
+      }
+    }
+  }
+
   // Owner map (nearest region for every stroke / edge pixel) and how wide the gap to it is.
+  // Edge pixels (anti-aliasing, slivers, soft rims) take the nearest region on their own side of
+  // the outlines, so a thin band inside an outline (the light rim along the points of a star)
+  // stays with the shape it is in rather than the region just across the line.
   for (let i = 0; i < n; i++) seeds[i] = labels[i] > 0 ? labels[i] : -1;
+  const edgePass = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (passable[i] && !(labels[i] === -1 && (isLine[comp[i]] === 1 || stroke[i]))) edgePass[i] = 1;
+  const sameSide = growLabels(seeds, edgePass, w, h);
   const grownFinal = growLabels(seeds, passable, w, h);
   for (let i = 0; i < n; i++) {
-    owner[i] = grownFinal.label[i] > 0 ? grownFinal.label[i] : 0;
-    gap[i] = grownFinal.dist[i];
+    const g = edgePass[i] && sameSide.label[i] > 0 ? sameSide : grownFinal;
+    owner[i] = g.label[i] > 0 ? g.label[i] : 0;
+    gap[i] = g.dist[i];
   }
 
   // ---- Final regions: renumber top to bottom, left to right by label point ----

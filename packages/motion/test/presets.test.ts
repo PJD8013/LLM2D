@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AnimationState, Skeleton, SkeletonData, validate, type L2DAnimation, type L2DFile } from '@llm2d/core';
-import { PRESETS, applyPreset, describePresets, mergeAnimations } from '../src/index.ts';
+import { PRESETS, applyPreset, describePresets, mergeAnimations, patchAnimation } from '../src/index.ts';
 
 const root = join(import.meta.dirname, '../../..');
 const load = (name: string): L2DFile => JSON.parse(readFileSync(join(root, 'samples', name, `${name}.l2d.json`), 'utf8'));
@@ -105,5 +105,39 @@ describe('presets', () => {
   it('describes every preset', () => {
     const text = describePresets();
     for (const p of PRESETS) expect(text).toContain(p.name);
+  });
+});
+
+describe('patchAnimation', () => {
+  const base = {
+    duration: 2,
+    bones: { arm: { rotate: [{ time: 0, value: 0 }, { time: 1, value: 30 }], scale: [{ time: 0, x: 1 }] }, leg: { rotate: [{ time: 0, value: 5 }] } },
+    slots: { eyes: { alpha: [{ time: 0, value: 1 }] } },
+    events: [{ time: 0.5, name: 'step' }],
+  };
+
+  it('replaces only the timelines it names and keeps the rest', () => {
+    const out = patchAnimation(base, { bones: { arm: { rotate: [{ time: 0, value: 10 }] } } });
+    expect(out.bones!.arm.rotate).toEqual([{ time: 0, value: 10 }]);
+    expect(out.bones!.arm.scale).toEqual(base.bones.arm.scale);
+    expect(out.bones!.leg).toEqual(base.bones.leg);
+    expect(out.slots).toEqual(base.slots);
+    expect(out.events).toEqual(base.events);
+    expect(out.duration).toBe(2);
+    expect(base.bones.arm.rotate[0].value).toBe(0); // base untouched
+  });
+
+  it('deletes timelines given as empty lists, replaces events and duration', () => {
+    const out = patchAnimation(base, {
+      duration: 1.5,
+      bones: { leg: { rotate: [] }, arm: { scale: [] } },
+      slots: { eyes: { alpha: [] } },
+      events: [{ time: 1, name: 'land' }, { time: 0.2, name: 'jump' }],
+    });
+    expect(out.bones).toEqual({ arm: { rotate: base.bones.arm.rotate } });
+    expect(out.slots).toBeUndefined();
+    expect(out.events!.map((e) => e.name)).toEqual(['jump', 'land']);
+    expect(out.duration).toBe(1.5);
+    expect(patchAnimation(base, { events: [] }).events).toBeUndefined();
   });
 });

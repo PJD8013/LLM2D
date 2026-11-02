@@ -5,6 +5,7 @@
  */
 import { SkeletonData, type L2DAnimation, type L2DCurve, type L2DFile } from '@llm2d/core';
 import { loadImageTextures, type LoadedLlm2d } from '@llm2d/pixi';
+import { Assets, type Texture } from 'pixi.js';
 import * as M from './model.ts';
 import type { Stage } from './stage.ts';
 
@@ -57,6 +58,20 @@ export class Editor {
   private saved = '';
   /** Snapshot taken at the start of a drag; each drag step replays from it. */
   private dragBase: string | null = null;
+  /** History state for the drag, pushed once the drag really changes something. */
+  private dragUndo: string | null = null;
+  private dragPushed = false;
+  /** A change on disk arrived during a drag; handled when the drag ends. */
+  private reloadPending = false;
+  /** Texture URLs of the open project (versioned, so a reload picks up changed images). */
+  private textureUrls: string[] = [];
+  private textureVersion = 0;
+  /** The latest open() call; an older one finishing later is ignored. */
+  private openToken = 0;
+  /** Counts edits, so a reload that was fetching while the user edited does not discard them. */
+  private edits = 0;
+  /** The skeleton file as last loaded (a change event for identical files is no reload). */
+  private loadedFile = '';
 
   // ---------------- Loading ----------------
 
@@ -70,31 +85,67 @@ export class Editor {
 
   /** Opens a project (or reloads the open one, keeping animation, time and selection). */
   async open(id: string, keep = false): Promise<void> {
+    const token = ++this.openToken;
+    const edits = this.edits;
     this.loading = true;
     try {
       const res = await fetch(`/api/project?id=${encodeURIComponent(id)}`);
       const body = await res.json();
+      if (token !== this.openToken) return;
       if (!res.ok) throw new Error(body.error ?? res.statusText);
+      const reloading = keep && this.info?.id === id;
+      const text = JSON.stringify(body.file);
+      if (reloading && text === this.loadedFile) return; // nothing new on disk
+      if (reloading && this.edits !== edits) {
+        // Edited while the files were being read: keep the edits, offer the reload instead.
+        this.externalChange = true;
+        return;
+      }
       const file = body.file as L2DFile;
       const data = SkeletonData.fromJSON(file);
-      const textures = await loadImageTextures(data.images, new URL(`/files/${encodeURIComponent(id)}/`, location.href).href);
+      // Versioned URLs: Pixi caches textures by URL, and a reload may bring changed images.
+      const version = ++this.textureVersion;
+      const urls: string[] = [];
+      const textures = await loadImageTextures(data.images, new URL(`/files/${encodeURIComponent(id)}/`, location.href).href, (url) => {
+        const src = `${url}?v=${version}`;
+        urls.push(src);
+        return Assets.load<Texture>(src);
+      });
+      if (token !== this.openToken || (reloading && this.edits !== edits)) {
+        void Assets.unload(urls).catch(() => {});
+        if (token === this.openToken) this.externalChange = true;
+        return;
+      }
+      this.loadedFile = text;
+      const sameProject = reloading;
       this.data = data;
       this.loaded = { data, textures };
       this.info = body.info;
-      this.stage?.setSkeleton(this.loaded);
+      this.stage?.setSkeleton(this.loaded, sameProject);
+      const old = this.textureUrls;
+      this.textureUrls = urls;
+      if (old.length) void Assets.unload(old).catch(() => {});
       this.history.clear();
-      this.saved = this.snapshot();
       this.dirty = false;
       this.externalChange = false;
+      this.reloadPending = false;
+      this.dragBase = null;
       this.refreshNames();
-      if (!keep || !this.animNames.includes(this.animName)) {
+      if (!sameProject) this.clipboard = null;
+      if (!sameProject || !this.animNames.includes(this.animName)) {
         this.animName = this.animNames.includes('idle') ? 'idle' : (this.animNames[0] ?? '');
         this.time = 0;
         this.selectedKeys = [];
         this.selectedBone = null;
         this.selectedSlot = null;
+      } else {
+        // Keep the selection only where it still exists (a rebuilt rig may rename bones).
+        if (this.selectedBone && data.findBone(this.selectedBone) < 0) this.selectedBone = null;
+        if (this.selectedSlot && data.findSlot(this.selectedSlot) < 0) this.selectedSlot = null;
+        this.selectedKeys = this.selectedKeys.filter((k) => M.getKey(this.anim, k));
       }
       if (!this.animName) this.newAnimation('idle', false);
+      this.saved = this.snapshot();
       const url = new URL(location.href);
       url.searchParams.set('project', id);
       history.replaceState(null, '', url);
@@ -103,14 +154,19 @@ export class Editor {
       this.pose();
       this.say(keep ? 'info' : null, keep ? '파일이 밖에서 바뀌어 다시 불러왔습니다.' : '');
     } catch (e) {
-      this.say('error', `불러오기 실패: ${(e as Error).message}`);
+      if (token === this.openToken) this.say('error', `불러오기 실패: ${(e as Error).message}`);
     } finally {
-      this.loading = false;
+      if (token === this.openToken) this.loading = false;
     }
   }
 
   private onExternalChange(id: string) {
     if (id !== this.info?.id || this.saving) return;
+    // Mid-drag the change waits: replaying the drag would silently undo it.
+    if (this.dragBase !== null) {
+      this.reloadPending = true;
+      return;
+    }
     if (!this.dirty) void this.open(id, true);
     else this.externalChange = true;
   }
@@ -134,8 +190,15 @@ export class Editor {
     this.animNames = Object.keys(this.data?.source.animations ?? {}).sort();
   }
 
+  /** The animations as JSON with names in a stable order (renaming back is not a change). */
   private snapshot(): string {
-    return JSON.stringify(this.data?.source.animations ?? {});
+    const all = this.data?.source.animations ?? {};
+    return JSON.stringify(Object.fromEntries(Object.keys(all).sort().map((n) => [n, all[n]])));
+  }
+
+  /** An undo state: the animation shown plus all animations. */
+  private historyState(): string {
+    return `${this.animName}\n${this.snapshot()}`;
   }
 
   private updateUndo() {
@@ -199,15 +262,18 @@ export class Editor {
 
   // ---------------- Editing ----------------
 
-  /** Applies a change to the current animation as one undo step. */
+  /** Applies a change to the current animation as one undo step (none if nothing changed). */
   edit(fn: (anim: L2DAnimation) => void, record = true) {
     if (!this.data || !this.animName) return;
-    if (record) this.history.push(this.snapshot());
+    const before = record ? this.historyState() : null;
     fn(this.anim);
+    M.prune(this.anim);
+    if (before !== null && this.historyState() !== before) this.history.push(before);
     this.commit();
   }
 
   private commit() {
+    this.edits++;
     M.prune(this.anim);
     this.data!.setAnimation(this.animName, this.anim);
     this.updateUndo();
@@ -215,10 +281,11 @@ export class Editor {
     this.pose();
   }
 
-  /** Starts a drag: one undo step for everything until endDrag. */
+  /** Starts a drag: one undo step for everything until endDrag (none if nothing changes). */
   beginDrag() {
     this.dragBase = this.snapshot();
-    this.history.push(this.dragBase);
+    this.dragUndo = this.historyState();
+    this.dragPushed = false;
   }
 
   /** Re-applies a drag step from the state at the start of the drag. */
@@ -227,24 +294,51 @@ export class Editor {
     const base = JSON.parse(this.dragBase) as Record<string, L2DAnimation>;
     this.data.source.animations[this.animName] = base[this.animName] ?? {};
     fn(this.anim);
+    M.prune(this.anim);
+    if (!this.dragPushed && this.snapshot() !== this.dragBase) {
+      this.history.push(this.dragUndo!);
+      this.dragPushed = true;
+    }
     this.commit();
   }
 
   endDrag() {
-    if (this.dragBase === this.snapshot()) this.history.undo(this.dragBase); // nothing changed
+    if (this.dragBase === null) return;
+    // Dragged back to where it started: no undo step.
+    if (this.dragPushed && this.snapshot() === this.dragBase) this.history.dropLast();
     this.dragBase = null;
+    this.dragUndo = null;
+    this.dragPushed = false;
     this.updateUndo();
+    if (this.reloadPending && this.info) {
+      this.reloadPending = false;
+      this.onExternalChange(this.info.id);
+    }
   }
 
-  /** Key time at the playhead, snapped to a frame. */
-  keyTime(): number {
-    return M.snap(this.time, this.fps);
+  /**
+   * Key time at the playhead: a key of `track` within half a frame (keys made elsewhere are
+   * often between frames), else the playhead snapped to a frame.
+   */
+  keyTime(track?: M.Track): number {
+    const snapped = M.snap(this.time, this.fps);
+    if (!track || !this.data || !this.animName || track.group === 'events') return snapped;
+    let best: number | null = null;
+    for (const k of M.keysOf(this.anim, track))
+      if (Math.abs(k.time - this.time) <= 0.5 / this.fps + 1e-9 && (best === null || Math.abs(k.time - this.time) < Math.abs(best - this.time))) best = k.time;
+    return best ?? snapped;
+  }
+
+  /** Warns when a key lands after the animation's set length (it would never play). */
+  private checkPastEnd(time: number) {
+    const d = this.anim.duration;
+    if (d !== undefined && time > d + 1e-6) this.say('info', `${time.toFixed(2)}초 키가 애니메이션 길이(${d}초)보다 뒤에 있어 재생되지 않습니다. 길이를 늘리세요.`);
   }
 
   /** Writes a key for a bone channel at the playhead from the values given (others kept). */
   keyBone(bone: string, channel: M.BoneChannel, values: Partial<{ value: number; x: number; y: number }>, record = true) {
-    const time = this.keyTime();
     const track: M.Track = { group: 'bones', target: bone, channel };
+    const time = this.keyTime(track);
     const apply = (anim: L2DAnimation) => {
       const existing = M.getKey(anim, { ...track, time });
       const fromPose = M.boneKeyFromPose(this.data!, this.stage!.skeleton!, bone, channel, time);
@@ -252,29 +346,34 @@ export class Editor {
     };
     if (record === false) this.dragStep(apply);
     else this.edit(apply);
+    this.checkPastEnd(time);
   }
 
   /** Keys the selected bone's channels (all three, or one) with the pose shown. */
   keySelected(channels: M.BoneChannel[] = ['rotate', 'translate', 'scale']) {
     const bone = this.selectedBone;
     if (!bone || !this.stage?.skeleton) return this.say('info', '먼저 뼈를 선택하세요.');
-    const time = this.keyTime();
-    const keys = channels.map((ch) => M.boneKeyFromPose(this.data!, this.stage!.skeleton!, bone, ch, time));
-    this.edit((anim) => keys.forEach((k, i) => M.setKey(anim, { group: 'bones', target: bone, channel: channels[i] }, k)));
-    this.say('ok', `${bone}: ${channels.map(M.channelLabel).join(', ')} 키를 ${time.toFixed(2)}초에 넣었습니다.`);
+    const tracks = channels.map((channel): M.Track => ({ group: 'bones', target: bone, channel }));
+    const times = tracks.map((t) => this.keyTime(t));
+    const keys = channels.map((ch, i) => M.boneKeyFromPose(this.data!, this.stage!.skeleton!, bone, ch, times[i]));
+    this.edit((anim) => keys.forEach((k, i) => M.setKey(anim, tracks[i], k)));
+    this.say('ok', `${bone}: ${channels.map(M.channelLabel).join(', ')} 키를 ${times[0].toFixed(2)}초에 넣었습니다.`);
+    this.checkPastEnd(Math.max(...times));
   }
 
   /** Writes a slot key at the playhead. */
   keySlot(slot: string, channel: M.SlotChannel, key: Record<string, unknown>) {
-    const time = this.keyTime();
-    this.edit((anim) => M.setKey(anim, { group: 'slots', target: slot, channel }, { ...key, time }));
+    const track: M.Track = { group: 'slots', target: slot, channel };
+    const time = this.keyTime(track);
+    this.edit((anim) => M.setKey(anim, track, { ...key, time }));
+    this.checkPastEnd(time);
   }
 
   /** Adds a key at a time using the value the animation has there (double-click on a track). */
   addKeyAt(track: M.Track, time: number) {
     if (!this.stage?.skeleton) return;
     this.seek(time);
-    const t = this.keyTime();
+    const t = this.keyTime(track);
     if (track.group === 'events') return this.addEvent('event');
     const sk = this.stage.skeleton;
     const key =
@@ -302,9 +401,11 @@ export class Editor {
     this.selectedKeys = moved;
   }
 
-  setCurve(curve: L2DCurve | undefined) {
+  /** Sets the curve of the selected keys; `live` while a handle is dragged (one undo step). */
+  setCurve(curve: L2DCurve | undefined, live = false) {
     const refs = this.selectedKeys;
-    this.edit((anim) => M.setCurve(anim, refs, curve));
+    if (live && this.dragBase !== null) this.dragStep((anim) => M.setCurve(anim, refs, curve));
+    else this.edit((anim) => M.setCurve(anim, refs, curve));
   }
 
   setKeyTime(time: number) {
@@ -334,10 +435,16 @@ export class Editor {
 
   paste() {
     const clip = this.clipboard;
-    if (!clip) return;
+    if (!clip || !this.data) return;
+    // Only keys whose bone, slot or IK constraint exists here.
+    const data = this.data;
+    const exists = (t: M.Track) =>
+      t.group === 'events' || (t.group === 'bones' ? data.findBone(t.target) >= 0 : t.group === 'slots' ? data.findSlot(t.target) >= 0 : data.findIk(t.target) >= 0);
+    const items = clip.items.filter((i) => exists(i.track));
+    if (!items.length) return this.say('info', '붙일 수 있는 키가 없습니다(이 스켈레톤에 없는 뼈나 슬롯의 키).');
     const at = this.keyTime();
     let pasted: M.KeyRef[] = [];
-    this.edit((anim) => (pasted = M.pasteKeys(anim, clip, at)));
+    this.edit((anim) => (pasted = M.pasteKeys(anim, { items }, at)));
     this.selectedKeys = pasted;
     this.say('ok', `키 ${pasted.length}개를 ${at.toFixed(2)}초에 붙였습니다.`);
   }
@@ -376,7 +483,8 @@ export class Editor {
     if (!this.data) return;
     if (!/^[A-Za-z0-9_-]+$/.test(name)) return this.say('error', '이름은 영문, 숫자, _, - 만 쓸 수 있습니다.');
     if (this.data.source.animations[name]) return this.say('error', `"${name}" 애니메이션이 이미 있습니다.`);
-    if (record) this.history.push(this.snapshot());
+    if (record) this.history.push(this.historyState());
+    if (record) this.edits++;
     this.data.setAnimation(name, { duration: 1 });
     this.refreshNames();
     this.updateUndo();
@@ -387,7 +495,8 @@ export class Editor {
     if (!this.data || !this.animName) return;
     if (this.data.source.animations[name]) return this.say('error', `"${name}" 애니메이션이 이미 있습니다.`);
     if (!/^[A-Za-z0-9_-]+$/.test(name)) return this.say('error', '이름은 영문, 숫자, _, - 만 쓸 수 있습니다.');
-    this.history.push(this.snapshot());
+    this.history.push(this.historyState());
+    this.edits++;
     this.data.setAnimation(name, structuredClone(this.anim));
     this.refreshNames();
     this.updateUndo();
@@ -398,7 +507,8 @@ export class Editor {
     if (!this.data || !this.animName || name === this.animName) return;
     if (!/^[A-Za-z0-9_-]+$/.test(name)) return this.say('error', '이름은 영문, 숫자, _, - 만 쓸 수 있습니다.');
     if (this.data.source.animations[name]) return this.say('error', `"${name}" 애니메이션이 이미 있습니다.`);
-    this.history.push(this.snapshot());
+    this.history.push(this.historyState());
+    this.edits++;
     const anim = this.anim;
     this.data.removeAnimation(this.animName);
     this.data.setAnimation(name, anim);
@@ -409,7 +519,8 @@ export class Editor {
 
   deleteAnimation() {
     if (!this.data || !this.animName) return;
-    this.history.push(this.snapshot());
+    this.history.push(this.historyState());
+    this.edits++;
     this.data.removeAnimation(this.animName);
     this.refreshNames();
     if (!this.animNames.length) this.data.setAnimation('idle', { duration: 1 }), this.refreshNames();
@@ -419,11 +530,16 @@ export class Editor {
 
   // ---------------- Undo / save ----------------
 
-  private restore(snapshot: string) {
-    const all = JSON.parse(snapshot) as Record<string, L2DAnimation>;
+  private restore(state: string) {
+    this.edits++;
+    const cut = state.indexOf('\n');
+    const shown = state.slice(0, cut);
+    const all = JSON.parse(state.slice(cut + 1)) as Record<string, L2DAnimation>;
     for (const name of [...this.data!.animations.keys()]) this.data!.removeAnimation(name);
     for (const [name, anim] of Object.entries(all)) this.data!.setAnimation(name, anim);
     this.refreshNames();
+    // Back to the animation that was shown at that step (undoing a rename, copy or delete).
+    if (this.animNames.includes(shown)) this.animName = shown;
     if (!this.animNames.includes(this.animName)) this.animName = this.animNames[0] ?? '';
     this.selectedKeys = this.selectedKeys.filter((k) => this.animName && M.getKey(this.anim, k));
     this.updateUndo();
@@ -432,12 +548,14 @@ export class Editor {
   }
 
   undo() {
-    const prev = this.history.undo(this.snapshot());
+    if (this.dragBase !== null) return;
+    const prev = this.history.undo(this.historyState());
     if (prev !== null) this.restore(prev);
   }
 
   redo() {
-    const next = this.history.redo(this.snapshot());
+    if (this.dragBase !== null) return;
+    const next = this.history.redo(this.historyState());
     if (next !== null) this.restore(next);
   }
 
@@ -446,18 +564,19 @@ export class Editor {
     if (!this.info.editable) return this.say('error', this.info.note ?? '이 프로젝트는 저장할 수 없습니다.');
     this.saving = true;
     try {
-      const animations = this.data.source.animations;
+      // What is sent is what counts as saved: edits made while the request runs stay unsaved.
+      const sent = this.snapshot();
       const res = await fetch(`/api/project/animations?id=${encodeURIComponent(this.info.id)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ animations }),
+        body: `{"animations":${sent}}`,
       });
       const body = await res.json();
       if (!body.ok) {
         const errors = (body.errors ?? []).slice(0, 3).map((e: { path: string; message: string }) => `${e.path}: ${e.message}`);
         throw new Error(errors.length ? errors.join(' / ') : (body.error ?? res.statusText));
       }
-      this.saved = this.snapshot();
+      this.saved = sent;
       this.updateUndo();
       this.externalChange = false;
       this.say('ok', `저장했습니다 (${this.info.id}/animations.json).`);
