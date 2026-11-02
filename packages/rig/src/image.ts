@@ -101,12 +101,15 @@ export function composite(layers: Layer[], width: number, height: number): RGBAI
         const a = (s.data[si + 3] / 255) * layer.opacity;
         if (a <= 0) continue;
         const di = (y * width + x) * 4;
+        const da = d[di + 3] / 255;
         if (layer.blend === 'add') {
-          for (let c = 0; c < 3; c++) d[di + c] = Math.min(255, d[di + c] + Math.round(s.data[si + c] * a));
-          if (!d[di + 3]) d[di + 3] = Math.round(a * 255);
+          // Light adds in premultiplied space; over nothing it is just the light itself (stored
+          // with straight alpha, so a glow on a transparent canvas keeps its colour).
+          const oa = Math.min(1, da + a);
+          for (let c = 0; c < 3; c++) d[di + c] = Math.min(255, Math.round((d[di + c] * da + s.data[si + c] * a) / oa));
+          d[di + 3] = Math.round(oa * 255);
           continue;
         }
-        const da = d[di + 3] / 255;
         const oa = a + da * (1 - a);
         for (let c = 0; c < 3; c++) d[di + c] = Math.round((s.data[si + c] * a + d[di + c] * da * (1 - a)) / oa);
         d[di + 3] = Math.round(oa * 255);

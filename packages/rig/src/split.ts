@@ -5,11 +5,15 @@
  *   everything inside a polygon. Small regions enclosed by one part (buttons, highlights, stripes)
  *   join it automatically.
  * - Outline strokes go to the part in front: where an arm's outline lies over the body, the arm
- *   keeps the whole stroke. Remaining stroke pixels join the nearest part.
+ *   keeps the whole stroke, with its round caps and its anti-aliased fringe. Parts without an
+ *   outline of their own (a shine, a glow) take none. Remaining stroke pixels continue the
+ *   stroke they touch, or join the nearest part.
  * - Hidden areas are rebuilt: wherever a part is covered by parts in front of it, it is extended
  *   underneath (its shape closed with a disk of radius `fill`, plus an `overlap` band at the
- *   edges it shares with them) and painted with its nearest own colours, with the outline
- *   continued along the new edge. So when a front part moves, there is something behind it.
+ *   edges it shares with them, plus any hole that front parts cover completely) and painted
+ *   with its nearest own colours, with the outline continued along the new edge. So when a
+ *   front part moves, there is something behind it. See-through parts (glows, shadows) are
+ *   continued with their own faintness and no outline.
  *
  * Stacking the layers back gives the input picture exactly (checked: report.difference).
  */
@@ -243,11 +247,18 @@ export function splitArt(img: RGBAImage, seg: Segmentation, spec: SplitSpec): Sp
     }
   });
 
-  // Outlines go to the part in front: front parts claim stroke pixels within a stroke width.
+  // Outlines go to the part in front: front parts claim stroke pixels within a stroke width,
+  // together with the anti-aliased fringe on the stroke's far side (left with a part behind, it
+  // would stay there as a faint copy of the line). Parts drawn without an outline of their own (a
+  // shine, a glow) take no strokes: a line running along them outlines something else.
   const reach = seg.outline ? seg.outline.width + 1.5 : 3;
+  const capReach = seg.outline ? seg.outline.width * 1.5 : 3;
   const boxes = partBoxes(owner, P, w, h);
+  const outlined = outlinedParts(owner, pending, P, w, h);
+  const strokeOf = new Int16Array(n).fill(-1); // part that took each stroke pixel
   for (let i = P - 1; i >= 0; i--) {
-    const win = pad(boxes[i], reach + 2, w, h);
+    if (!outlined[i]) continue;
+    const win = pad(boxes[i], reach + capReach + 4, w, h);
     if (!win) continue;
     const seeds = new Int32Array(win.w * win.h).fill(-1);
     const pass = new Uint8Array(win.w * win.h);
@@ -256,16 +267,81 @@ export function splitArt(img: RGBAImage, seg: Segmentation, spec: SplitSpec): Sp
       else if (pending[g]) pass[k] = 1;
     });
     const got = growLabels(seeds, pass, win.w, win.h, reach).label;
+    const claimed = new Uint8Array(win.w * win.h);
     forWin(win, w, (k, g) => {
       if (pass[k] && got[k] === i) {
         owner[g] = i;
         pending[g] = 0;
+        claimed[k] = 1;
+        strokeOf[g] = i;
       }
     });
+    // Dead ends: leftover stroke pieces touching the claimed stroke that lie entirely within
+    // another half stroke of it (the round caps at a star's points, the far edge of a line
+    // thicker than usual) belong to it too. Lines that run on elsewhere stay.
+    for (const piece of deadEnds(claimed, pass, win.w, win.h, capReach))
+      for (const k of piece) {
+        const g = (Math.floor(k / win.w) + win.y) * w + (k % win.w) + win.x;
+        owner[g] = i;
+        pending[g] = 0;
+        claimed[k] = 1;
+        strokeOf[g] = i;
+      }
+    // Fringe: edge pixels (not inside any region) of parts behind, within two pixels of the
+    // claimed stroke and visibly tinted by it: at least 15% of the way from the colour behind
+    // (the region's pixels close by, as regions can be gradients) to the line's colour.
+    const fringe: number[] = [];
+    forWin(win, w, (k, g) => {
+      if (claimed[k] || seg.labels[g] > 0 || owner[g] < 0 || owner[g] >= i) return;
+      const back = seg.owner[g];
+      if (back <= 0) return;
+      const x = k % win.w;
+      const y = (k - x) / win.w;
+      let line = -1;
+      let best = Infinity;
+      const c = [0, 0, 0];
+      let count = 0;
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= win.w || ny >= win.h) continue;
+          const j = g + dy * w + dx;
+          if (seg.labels[j] === back) {
+            for (let ch = 0; ch < 3; ch++) c[ch] += data[j * 4 + ch];
+            count++;
+          }
+          if (Math.abs(dx) <= 2 && Math.abs(dy) <= 2 && claimed[ny * win.w + nx] && dx * dx + dy * dy < best) {
+            best = dx * dx + dy * dy;
+            line = j;
+          }
+        }
+      if (line < 0) return;
+      if (count) for (let ch = 0; ch < 3; ch++) c[ch] /= count;
+      else c.splice(0, 3, ...regionRGB[back - 1]);
+      let along = 0;
+      let len = 0;
+      for (let ch = 0; ch < 3; ch++) {
+        const s = data[line * 4 + ch] - c[ch];
+        along += (data[g * 4 + ch] - c[ch]) * s;
+        len += s * s;
+      }
+      if (len > 0 && along >= len * 0.15) fringe.push(g);
+    });
+    for (const g of fringe) owner[g] = i;
   }
-  // Whatever is left (thick strokes, stray edge pixels) joins the nearest part.
+  // Whatever is left (thick strokes, stray edge pixels) continues the stroke it touches, or else
+  // joins the nearest part.
   {
     const seeds = new Int32Array(n).fill(-1);
+    for (let k = 0; k < n; k++) if (strokeOf[k] >= 0) seeds[k] = strokeOf[k];
+    const along = growLabels(seeds, pending, w, h).label;
+    for (let k = 0; k < n; k++)
+      if (pending[k] && along[k] >= 0) {
+        owner[k] = along[k];
+        pending[k] = 0;
+      }
+    seeds.fill(-1);
     for (let k = 0; k < n; k++) if (owner[k] >= 0) seeds[k] = owner[k];
     const got = growLabels(seeds, pending, w, h).label;
     for (let k = 0; k < n; k++) if (pending[k] && got[k] >= 0) owner[k] = got[k];
@@ -312,6 +388,9 @@ export function splitArt(img: RGBAImage, seg: Segmentation, spec: SplitSpec): Sp
         const d = dilateDisk(m, win.w, win.h, o);
         for (let k = 0; k < d.length; k++) if (d[k]) grown[k] = 1;
       }
+      // Holes that parts in front cover completely (the glow behind a coin, a body behind a
+      // shield) are rebuilt whatever their size.
+      if (r > 0) fillCoveredHoles(grown, m, win, w, owner, i);
       forWin(win, w, (k, g) => {
         if (grown[k] && !m[k] && frontAt[g] > i) f[k] = 1;
       });
@@ -332,10 +411,15 @@ export function splitArt(img: RGBAImage, seg: Segmentation, spec: SplitSpec): Sp
       });
     }
     const image = createImage(win.w, win.h);
+    let opaque = 0;
     forWin(win, w, (k, g) => {
-      if (m[k]) image.data.set(data.subarray(g * 4, g * 4 + 4), k * 4);
+      if (!m[k]) return;
+      image.data.set(data.subarray(g * 4, g * 4 + 4), k * 4);
+      if (data[g * 4 + 3] === 255) opaque++;
     });
-    if (filled) paintFill(image, data, seg, win, w, m, f, line);
+    // Mostly see-through parts (glows, shadows) are continued faintly and without an outline.
+    const solidPart = opaque >= pixels * 0.5;
+    if (filled) paintFill(image, data, seg, win, w, m, f, solidPart ? line : null, solidPart);
     const trimmed = trimLayer({ name: part.name, x: win.x, y: win.y, image, hidden: false, opacity: 1, blend: 'normal' });
     if (trimmed) layers.push(trimmed);
     reports.push({
@@ -367,7 +451,7 @@ export function splitArt(img: RGBAImage, seg: Segmentation, spec: SplitSpec): Sp
 
 /**
  * Paints rebuilt pixels (`f`, window coordinates) with the part's nearest own colours, continuing
- * the outline along the new edge.
+ * the outline along the new edge. See-through parts (`opaqueFill` false) keep their sources' alpha.
  */
 function paintFill(
   image: RGBAImage,
@@ -378,14 +462,16 @@ function paintFill(
   m: Uint8Array,
   f: Uint8Array,
   outline: { width: number; color: [number, number, number] } | null,
+  opaqueFill: boolean,
 ) {
   const n = win.w * win.h;
   // Sources: the part's solid colour areas, a few pixels away from any colour change, so thin
-  // details (fold lines, stripes) and anti-aliased edges are not smeared into the fill.
+  // details (fold lines, stripes) and anti-aliased edges are not smeared into the fill. (Opaque
+  // ones only for solid parts; a glow has none.)
   const solid = new Uint8Array(n);
   forWin(win, w, (k, g) => {
     const l = seg.labels[g];
-    if (!m[k] || l <= 0 || data[g * 4 + 3] !== 255) return;
+    if (!m[k] || l <= 0 || (opaqueFill && data[g * 4 + 3] !== 255)) return;
     const x = k % win.w;
     const y = (k - x) / win.w;
     if (x === 0 || y === 0 || x === win.w - 1 || y === win.h - 1) return;
@@ -408,6 +494,14 @@ function paintFill(
   const passable = new Uint8Array(n);
   for (let k = 0; k < n; k++) if (f[k] || (m[k] && seeds[k] < 0)) passable[k] = 1;
   const src = growLabels(seeds, passable, win.w, win.h).label;
+  // Rebuilt areas cut off from the part by pixels it cannot cover (a soft edge of the part in
+  // front between a glow and the hole behind that part) take the nearest colours across them.
+  let cut = false;
+  for (let k = 0; k < n && !cut; k++) if (f[k] && src[k] < 0) cut = true;
+  if (cut) {
+    const across = growLabels(seeds, new Uint8Array(n).fill(1), win.w, win.h).label;
+    for (let k = 0; k < n; k++) if (f[k] && src[k] < 0) src[k] = across[k];
+  }
 
   const whole = new Uint8Array(n);
   for (let k = 0; k < n; k++) whole[k] = m[k] || f[k] ? 1 : 0;
@@ -429,7 +523,147 @@ function paintFill(
     d[k * 4] = Math.round(r);
     d[k * 4 + 1] = Math.round(g);
     d[k * 4 + 2] = Math.round(b);
-    d[k * 4 + 3] = 255;
+    // Solid parts are filled opaque; a glow keeps the faintness of its nearest pixel.
+    d[k * 4 + 3] = opaqueFill ? 255 : data[s * 4 + 3];
+  }
+}
+
+/**
+ * Whether each part has an outline of its own: most of its edge (pixels next to anything else)
+ * lies within two pixels of stroke pixels still to be handed out.
+ */
+function outlinedParts(owner: Int16Array, pending: Uint8Array, P: number, w: number, h: number): Uint8Array {
+  const edge = new Float64Array(P);
+  const inked = new Float64Array(P);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const k = y * w + x;
+      const p = owner[k];
+      if (p < 0) continue;
+      const border =
+        (x > 0 && owner[k - 1] !== p) || (x < w - 1 && owner[k + 1] !== p) || (y > 0 && owner[k - w] !== p) || (y < h - 1 && owner[k + w] !== p);
+      if (!border) continue;
+      edge[p]++;
+      search: for (let dy = -2; dy <= 2; dy++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h && pending[ny * w + nx]) {
+            inked[p]++;
+            break search;
+          }
+        }
+    }
+  const out = new Uint8Array(P);
+  for (let p = 0; p < P; p++) out[p] = edge[p] > 0 && inked[p] >= edge[p] * 0.5 ? 1 : 0;
+  return out;
+}
+
+/**
+ * Pieces (8-connected, window indices) of `pass` pixels not in `claimed` that touch `claimed`,
+ * stay inside the window, and are reached entirely within `maxDist` of it.
+ */
+function deadEnds(claimed: Uint8Array, pass: Uint8Array, ww: number, wh: number, maxDist: number): number[][] {
+  const n = ww * wh;
+  const seeds = new Int32Array(n).fill(-1);
+  const rest = new Uint8Array(n);
+  let any = false;
+  for (let k = 0; k < n; k++) {
+    if (claimed[k]) {
+      seeds[k] = 0;
+      any = true;
+    } else if (pass[k]) rest[k] = 1;
+  }
+  if (!any) return [];
+  const near = growLabels(seeds, rest, ww, wh, maxDist).label;
+  const seen = new Uint8Array(n);
+  const out: number[][] = [];
+  for (let k0 = 0; k0 < n; k0++) {
+    if (!rest[k0] || seen[k0]) continue;
+    const members: number[] = [];
+    let touches = false;
+    let inside = true;
+    const stack = [k0];
+    seen[k0] = 1;
+    while (stack.length) {
+      const k = stack.pop()!;
+      members.push(k);
+      if (near[k] < 0) inside = false;
+      const x = k % ww;
+      const y = (k - x) / ww;
+      if (x === 0 || y === 0 || x === ww - 1 || y === wh - 1) inside = false;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= ww || ny >= wh) continue;
+          const j = ny * ww + nx;
+          if (claimed[j]) touches = true;
+          else if (rest[j] && !seen[j]) {
+            seen[j] = 1;
+            stack.push(j);
+          }
+        }
+    }
+    if (touches && inside) out.push(members);
+  }
+  return out;
+}
+
+/**
+ * Adds to `grown` the holes in a part (`m`, window coordinates) whose every pixel belongs to a
+ * part in front of it.
+ */
+function fillCoveredHoles(grown: Uint8Array, m: Uint8Array, win: Win, w: number, owner: Int16Array, part: number) {
+  const n = win.w * win.h;
+  // Outside: everything not in the part that connects to the window's border.
+  const seen = new Uint8Array(n);
+  const stack: number[] = [];
+  const visit = (k: number) => {
+    if (!m[k] && !seen[k]) {
+      seen[k] = 1;
+      stack.push(k);
+    }
+  };
+  for (let x = 0; x < win.w; x++) {
+    visit(x);
+    visit((win.h - 1) * win.w + x);
+  }
+  for (let y = 0; y < win.h; y++) {
+    visit(y * win.w);
+    visit(y * win.w + win.w - 1);
+  }
+  const flood = () => {
+    while (stack.length) {
+      const k = stack.pop()!;
+      const x = k % win.w;
+      const y = (k - x) / win.w;
+      if (x > 0) visit(k - 1);
+      if (x < win.w - 1) visit(k + 1);
+      if (y > 0) visit(k - win.w);
+      if (y < win.h - 1) visit(k + win.w);
+    }
+  };
+  flood();
+  // Each remaining component is a hole.
+  for (let k0 = 0; k0 < n; k0++) {
+    if (m[k0] || seen[k0]) continue;
+    const start = stack.length;
+    const members: number[] = [];
+    visit(k0);
+    let covered = true;
+    while (stack.length > start) {
+      const k = stack.pop()!;
+      members.push(k);
+      const x = k % win.w;
+      const y = (k - x) / win.w;
+      if (owner[(y + win.y) * w + x + win.x] <= part) covered = false;
+      if (x > 0) visit(k - 1);
+      if (x < win.w - 1) visit(k + 1);
+      if (y > 0) visit(k - win.w);
+      if (y < win.h - 1) visit(k + win.w);
+    }
+    if (covered) for (const k of members) grown[k] = 1;
   }
 }
 
