@@ -1,0 +1,54 @@
+# Checks every push: unit and browser tests, type checks, sample validation, app builds and the
+# runtime packages (the same commands as "Verify changes" in CLAUDE.md).
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test
+        run: pnpm test
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Validate samples
+        run: pnpm validate
+
+      - name: Samples are up to date
+        run: |
+          pnpm samples
+          git diff --exit-code --stat
+
+      - name: Build apps
+        run: |
+          pnpm --filter @llm2d/viewer build
+          pnpm --filter @llm2d/editor build
+          pnpm --filter @llm2d/reel-demo build
+
+      - name: Pack runtime packages
+        run: pnpm pack:lib
