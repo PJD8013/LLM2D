@@ -181,7 +181,12 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
     if (empty.has(name)) throw new Error(`${where}: layer "${name}" is empty`);
     throw new Error(`${where}: no layer named "${name}". Layers: ${layerList()}`);
   };
-  const partOf = (e: LayerEntry): RigPart | undefined => spec.parts?.[e.name] ?? spec.parts?.[e.id] ?? spec.parts?.[legacyName(e.name)];
+  // A spec key names a layer by its name in the art, or by its id or old ASCII name when no
+  // other layer is called that.
+  const partOf = (e: LayerEntry): RigPart | undefined => {
+    const key = [e.name, e.id, legacyName(e.name)].find((k) => Object.hasOwn(spec.parts ?? {}, k) && byName.get(k) === e);
+    return key === undefined ? undefined : spec.parts![key];
+  };
   for (const key of Object.keys(spec.parts ?? {}))
     if (!byName.has(key) && !empty.has(key)) warnings.push(`parts."${key}": no layer with that name, ignored. Layers: ${layerList()}`);
 
@@ -274,7 +279,14 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
         slotFor.set(e, null);
         continue;
       }
-      slotFor.set(e, base);
+      const basePart = partOf(base);
+      if (basePart?.skip) {
+        warnings.push(`${e.name}: skipped like its layer "${base.name}" (give it parts.${e.name}.slot to put it in another slot)`);
+        slotFor.set(e, null);
+        continue;
+      }
+      // A base that is itself alternate art lends its slot.
+      slotFor.set(e, basePart?.slot ? findLayer(basePart.slot, `Layer "${base.name}": parts.slot`) : base);
       continue;
     }
     slotFor.set(e, e);
@@ -401,6 +413,7 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
 
   // Clipping: a slot just below each clipped part, holding the clip layer's outline. It follows
   // the clip layer: its bone, or, for a bending mesh, the bones and weights of the nearest vertex.
+  const clipped = new Set<string>();
   for (const e of entries) {
     const part = partOf(e);
     if (!part?.clip || part.skip) continue;
@@ -409,9 +422,11 @@ export function buildRig(art: LayeredArt, spec: RigSpec, animations: Record<stri
     const clipEntry = findLayer(part.clip, `Layer "${e.name}": parts.clip`);
     const clipPart = parts.find((p) => p.layer === clipEntry.name);
     if (!clipPart) throw new Error(`Layer "${e.name}": clip layer "${part.clip}" is not rigged (skipped or alternate art)`);
+    if (clipped.has(own.slot)) continue; // alternate art of the same slot
+    clipped.add(own.slot);
     const slotIndex = slots.findIndex((sl) => sl.name === own.slot);
-    const clipSlot = `${own.slot}_clip`;
-    if (slots.some((sl) => sl.name === clipSlot)) continue; // alternate art of the same slot
+    let clipSlot = `${own.slot}_clip`;
+    for (let n = 2; slots.some((sl) => sl.name === clipSlot); n++) clipSlot = `${own.slot}_clip_${n}`;
     const clipLayer = clipEntry.layer;
     const { width: w, height: h } = clipLayer.image;
     const { labels, list } = components(alphaMask(clipLayer.image, 127), w, h);

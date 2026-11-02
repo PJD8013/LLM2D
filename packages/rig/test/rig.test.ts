@@ -220,6 +220,38 @@ describe('buildRig', () => {
     );
   });
 
+  it('keeps parts, skipped bases and clip slots apart when names come close', () => {
+    const spec: RigSpec = {
+      name: 't',
+      origin: [100, 100],
+      bones: [
+        { name: 'b', from: [100, 150], to: [100, 50] },
+        { name: 'c', from: [50, 100], to: [150, 100] },
+      ],
+    };
+    // "a b" gets the slot id "a_b"; parts written for the layer named "a_b" stay with that layer.
+    const named = buildRig(art(200, 200, [layer('a b', dot(20), 40, 40), layer('a_b', dot(20), 120, 120)]), { ...spec, parts: { a_b: { bone: 'c' } } });
+    expect(named.report.parts.map((p) => [p.layer, p.slot, p.auto])).toEqual([
+      ['a b', 'a_b', true],
+      ['a_b', 'a_b_2', false],
+    ]);
+    // Skipping a layer also skips its hidden alternates (with a warning), instead of failing.
+    const skipped = buildRig(art(200, 200, [layer('body', dot(40), 50, 50), layer('eyes', dot(10), 80, 80), layer('eyes_closed', dot(8), 82, 82, { hidden: true })]), {
+      ...spec,
+      parts: { eyes: { skip: true } },
+    });
+    expect(skipped.file.slots.map((sl) => sl.name)).toEqual(['body']);
+    expect(skipped.report.warnings.some((w) => w.startsWith('eyes_closed: skipped like its layer "eyes"'))).toBe(true);
+    // A layer already called "shine_clip" does not stop the shine from being clipped.
+    const clip = buildRig(art(200, 200, [layer('coin', dot(40), 50, 50), layer('shine_clip', dot(5), 10, 10), layer('shine', dot(10), 90, 90)]), {
+      ...spec,
+      parts: { shine: { bone: 'b', clip: 'coin' } },
+    });
+    expect(clip.file.slots.map((sl) => sl.name)).toEqual(['coin', 'shine_clip', 'shine_clip_2', 'shine']);
+    expect(clip.file.attachments.shine_clip_2.shine_clip_2.type).toBe('clipping');
+    expect(validate(clip.file).ok).toBe(true);
+  });
+
   it('puts hidden alternate art in its base slot without moving the base in the draw order', () => {
     // Back to front. The hidden alternates sit below their base layers in the art.
     const layers = [
